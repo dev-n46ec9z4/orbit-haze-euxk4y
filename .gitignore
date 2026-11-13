@@ -1,0 +1,4 @@
+# Rojo / Studio lock and tooling files
+*.rbxl.lock
+*.rbxlx.lock
+sourcemap.json

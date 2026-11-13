@@ -1,1 +1,39 @@
-# orbit-haze-euxk4y
+# Falling Tiles Survival
+
+A Roblox multiplayer survival game: players wait in a sky lobby, get teleported onto a 10x10 tile arena, and try to outlast tiles that flash red and fall away in accelerating waves.
+
+All Workspace geometry (lobby, spawn, barriers, neon trim, arena tiles) is created at runtime by `src/Server/World.luau` — no external assets, mesh IDs, or hand-written XML.
+
+## Build
+
+```sh
+rojo build -o FallingTilesGame.rbxl   # Rojo 7.x
+node scripts/validate.mjs             # JSON + require-path checks
+```
+
+`default.project.json` maps:
+
+| Instance | Source |
+| --- | --- |
+| `ReplicatedStorage.Shared` | `src/Shared` (Config, Net, Format) |
+| `ServerScriptService.Server` | `src/Server` (GameLoop, World, PlayerData) |
+| `StarterPlayer.StarterPlayerScripts.Client` | `src/Client` (Hud) |
+
+## Round flow
+
+1. **Waiting** until at least `MIN_PLAYERS` (1) are in the server.
+2. **Intermission** — 10s countdown (`INTERMISSION: 10s`).
+3. **Grace** — alive players are tagged `Alive` (CollectionService tag + `Alive` attribute), teleported onto random tiles, and get 3s before anything falls (`GET READY: 3`).
+4. **Survive** — every wave drops 3–5 random intact tiles; the wave interval eases from 1.2s to 0.5s across the 60s round. Tiles flash red for 0.6s, unanchor, and are destroyed 2s later (`SURVIVE!`).
+5. **Results** — survivors get +1 Win and +25 Coins, the winner is announced (`WINNER: <Name>`), survivors return to the lobby, the arena is destroyed and the loop repeats.
+
+Falling below Y = -20 (the kill plane), dying, resetting, or leaving eliminates a player. Eliminated players respawn in the lobby after 3s. Late joiners spawn in the lobby and their HUD requests the current state on load.
+
+### Last-survivor rule and solo testing
+
+- Rounds that **start with 2+ players** end when 0 or 1 players remain, or at 60s.
+- Rounds that **start with 1 player** (e.g. solo Play in Studio) do *not* end just because one player is alive. They end when that player is eliminated or when the 60s timer runs out; surviving the full minute counts as a win.
+
+## Data
+
+Wins and Coins live in `leaderstats`. Persistence uses the `FallingTilesStats_v1` DataStore; every DataStore call is wrapped in `pcall`. If DataStores are unavailable (e.g. Studio without API access) stats stay session-only, and a player whose load failed is never saved so stored data isn't overwritten.
