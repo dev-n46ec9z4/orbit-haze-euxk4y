@@ -8,6 +8,10 @@
 --   * Rounds that start with exactly 1 player (solo / Studio testing) only end when
 --     that player is eliminated or the 60s timer runs out. Surviving the full minute
 --     wins the round; ending at "1 alive" would otherwise finish a solo round instantly.
+--
+-- Game modes rotate through Config.MODE_ORDER (Classic -> Shrinking Ring -> Hazard
+-- Storm). Each mode sets the wave pattern/size, which hazards run and how often, and
+-- how often power-ups spawn. Special tiles, hazards and power-ups only act during Survive.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -15,17 +19,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Catalog = require(Shared:WaitForChild("Catalog"))
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
+local Grid = require(Shared:WaitForChild("Grid"))
 local Net = require(Shared:WaitForChild("Net"))
 
+local Hazards = require(script.Parent:WaitForChild("Hazards"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local PowerUps = require(script.Parent:WaitForChild("PowerUps"))
+local TileEffects = require(script.Parent:WaitForChild("TileEffects"))
 local World = require(script.Parent:WaitForChild("World"))
 
 local Phases = Config.Phases
 local ALIVE_TAG = Config.ALIVE_TAG
 
 local roundStateEvent = Net.getRoundStateEvent()
+local gameEvent = Net.getGameEvent()
+-- Server -> client only; drain anything clients send so it never queues.
+gameEvent.OnServerEvent:Connect(function() end)
 
 Players.RespawnTime = Config.RESPAWN_TIME
 Players.CharacterAutoLoads = true
@@ -41,6 +53,7 @@ local state = {
 	alive = 0,
 	total = 0,
 	winners = {} :: { string },
+	mode = Config.MODE_ORDER[1],
 }
 
 local roundActive = false -- true during Grace and Survive
@@ -56,6 +69,7 @@ local function snapshot()
 		total = state.total,
 		players = #Players:GetPlayers(),
 		winners = state.winners,
+		mode = state.mode,
 	}
 end
 
@@ -70,20 +84,28 @@ local function setState(changes: { [string]: any })
 	broadcast()
 end
 
+local function toast(text: string, color: Color3?, duration: number?)
+	gameEvent:FireAllClients({ kind = "Toast", text = text, color = color, duration = duration or 2.5 })
+end
+
 -- Alive tracking -------------------------------------------------------------
 
 local function isAlive(player: Player): boolean
 	return CollectionService:HasTag(player, ALIVE_TAG)
 end
 
-local function countAlive(): number
-	local count = 0
+local function getAliveParticipants(): { Player }
+	local alive = {}
 	for player in pairs(participants) do
 		if isAlive(player) and player.Parent == Players then
-			count += 1
+			table.insert(alive, player)
 		end
 	end
-	return count
+	return alive
+end
+
+local function countAlive(): number
+	return #getAliveParticipants()
 end
 
 local function setAlive(player: Player, alive: boolean)
@@ -107,6 +129,8 @@ local function eliminate(player: Player)
 		return
 	end
 	setAlive(player, false)
+	PowerUps.clear(player)
+	TileEffects.forget(player)
 	if roundActive then
 		setState({ alive = countAlive() })
 	end
@@ -183,8 +207,14 @@ Players.PlayerRemoving:Connect(function(player)
 	lastRequest[player] = nil
 end)
 
--- Kill plane: anything below KILL_PLANE_Y dies and is eliminated.
+-- Rescue Wings fire first (they trigger well above the kill plane); then anything
+-- below KILL_PLANE_Y dies and is eliminated.
 RunService.Heartbeat:Connect(function()
+	if roundActive then
+		for _, player in ipairs(getAliveParticipants()) do
+			PowerUps.tryRescue(player)
+		end
+	end
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -244,7 +274,15 @@ local function waitForPlayers()
 end
 
 -- Returns false if the player count dropped below the minimum mid-countdown.
-local function runIntermission(): boolean
+local modeIndex = 0
+
+-- Index into Config.MODE_ORDER of the mode the next round will use. Only advances
+-- once a round actually starts, so an aborted intermission doesn't skip a mode.
+local function peekNextMode(): number
+	return (modeIndex % #Config.MODE_ORDER) + 1
+end
+
+local function runIntermission(nextMode: string): boolean
 	for remaining = Config.INTERMISSION_TIME, 1, -1 do
 		if not hasEnoughPlayers() then
 			return false
@@ -256,6 +294,7 @@ local function runIntermission(): boolean
 			alive = 0,
 			total = 0,
 			winners = {},
+			mode = nextMode,
 		})
 		task.wait(1)
 	end
@@ -264,6 +303,8 @@ end
 
 local function cleanupRound()
 	roundActive = false
+	PowerUps.endRound()
+	TileEffects.reset()
 	for player in pairs(participants) do
 		setAlive(player, false)
 	end
@@ -272,8 +313,11 @@ local function cleanupRound()
 	currentArena = nil
 end
 
-local function runRound()
+local function runRound(modeId: string)
+	local mode = Config.Modes[modeId] or Config.Modes.Classic
+	local modeInfo = Catalog.find(Catalog.Modes, modeId)
 	currentArena = World.buildArena()
+	local arena = currentArena :: Model
 
 	local players = getEligiblePlayers()
 	if #players == 0 then
@@ -282,7 +326,7 @@ local function runRound()
 		return
 	end
 
-	local spawns = World.getSpawnCFrames(currentArena :: Model, #players)
+	local spawns = World.getSpawnCFrames(arena, #players)
 	for index, player in ipairs(players) do
 		local character = player.Character
 		if character then
@@ -312,8 +356,26 @@ local function runRound()
 	end
 
 	-- Survive phase: waves accelerate from WAVE_INTERVAL_START to WAVE_INTERVAL_END.
+	local hazardContext: Hazards.Context = {
+		arena = arena,
+		isActive = function()
+			return roundActive and currentArena == arena and arena.Parent ~= nil
+		end,
+		alivePlayers = getAliveParticipants,
+		notify = function(text, color)
+			toast(text, color)
+		end,
+	}
+	World.activateTiles(arena)
+	PowerUps.startRound(arena)
+	if modeInfo then
+		toast(string.upper(modeInfo.name) .. ": " .. modeInfo.description, modeInfo.color, 4)
+	end
+
 	local startTime = os.clock()
 	local nextWaveAt = startTime
+	local nextHazardAt = startTime + mode.firstHazardAt
+	local nextPowerUpAt = startTime + mode.powerUpInterval / 2
 	local lastShown = -1
 	while not shouldEndRound(total) do
 		local now = os.clock()
@@ -323,12 +385,24 @@ local function runRound()
 		end
 
 		if now >= nextWaveAt then
-			World.dropWave(currentArena, math.random(Config.WAVE_MIN_TILES, Config.WAVE_MAX_TILES))
-			local alpha = math.clamp(elapsed / Config.ROUND_TIME, 0, 1)
-			local interval = Config.WAVE_INTERVAL_START
-				+ (Config.WAVE_INTERVAL_END - Config.WAVE_INTERVAL_START) * alpha
-			nextWaveAt = now + interval
+			World.dropWave(arena, math.random(mode.waveMin, mode.waveMax), mode.pattern)
+			nextWaveAt = now
+				+ Grid.waveInterval(elapsed, Config.ROUND_TIME, Config.WAVE_INTERVAL_START, Config.WAVE_INTERVAL_END)
 		end
+
+		if now >= nextHazardAt and #mode.hazards > 0 then
+			Hazards.start(mode.hazards[math.random(#mode.hazards)], hazardContext)
+			nextHazardAt = now + mode.hazardInterval
+		end
+
+		if now >= nextPowerUpAt then
+			PowerUps.spawnPickup()
+			nextPowerUpAt = now + mode.powerUpInterval
+		end
+
+		local alivePlayers = getAliveParticipants()
+		TileEffects.tick(arena, alivePlayers, now)
+		PowerUps.tick(alivePlayers, now)
 
 		local timeLeft = math.max(0, math.ceil(Config.ROUND_TIME - elapsed))
 		if timeLeft ~= lastShown then
@@ -396,8 +470,11 @@ end
 task.spawn(function()
 	while true do
 		waitForPlayers()
-		if runIntermission() then
-			local ok, err = pcall(runRound)
+		local nextIndex = peekNextMode()
+		local modeId = Config.MODE_ORDER[nextIndex]
+		if runIntermission(modeId) then
+			modeIndex = nextIndex
+			local ok, err = pcall(runRound, modeId)
 			if not ok then
 				warn("[GameLoop] Round error:", err)
 				cleanupRound()

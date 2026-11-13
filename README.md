@@ -9,14 +9,15 @@ All Workspace geometry (lobby, spawn, barriers, neon trim, arena tiles) is creat
 ```sh
 rojo build -o FallingTilesGame.rbxl   # Rojo 7.x
 node scripts/validate.mjs             # JSON + require-path checks
+node tests/run.mjs                    # standalone Luau tests (needs `luau` on PATH, or LUAU=/path/to/luau)
 ```
 
 `default.project.json` maps:
 
 | Instance | Source |
 | --- | --- |
-| `ReplicatedStorage.Shared` | `src/Shared` (Config, Net, Format) |
-| `ServerScriptService.Server` | `src/Server` (GameLoop, World, PlayerData) |
+| `ReplicatedStorage.Shared` | `src/Shared` (Config, Catalog, Grid, Net, Format) |
+| `ServerScriptService.Server` | `src/Server` (GameLoop, World, TileEffects, Hazards, PowerUps, Impulse, PlayerData) |
 | `StarterPlayer.StarterPlayerScripts.Client` | `src/Client` (Hud) |
 
 ## Round flow
@@ -28,6 +29,12 @@ node scripts/validate.mjs             # JSON + require-path checks
 5. **Results** — survivors get +1 Win and +25 Coins, the winner is announced (`WINNER: <Name>`), survivors return to the lobby, the arena is destroyed and the loop repeats.
 
 Falling below Y = -20 (the kill plane), dying, resetting, or leaving eliminates a player. Eliminated players respawn in the lobby after 3s. Late joiners spawn in the lobby and their HUD requests the current state on load.
+
+## Modes, tiles, hazards and power-ups
+
+Modes rotate each round: **Classic** (random waves, occasional hazards), **Shrinking Ring** (tiles fall from the edge inward) and **Hazard Storm** (smaller waves, a hazard every 6s). Each arena mixes in special tiles: Ice, Crumble, Reinforced, Bounce Pad and Conveyor. The hazards are Meteor, Sweeper and Row Collapse. Glowing orbs give Speed Boost, Super Jump or Rescue Wing. All of these are active only during Survive.
+
+In game, press **G** or click **GUIDE** for descriptions of everything. Names and descriptions live in `src/Shared/Catalog.luau`, and tuning lives in `src/Shared/Config.luau`. See [FEATURES.md](FEATURES.md) for the numbered checklist and how each feature was verified.
 
 ### Last-survivor rule and solo testing
 

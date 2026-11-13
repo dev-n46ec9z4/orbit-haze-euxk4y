@@ -4,7 +4,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Catalog = require(Shared:WaitForChild("Catalog"))
+local Config = require(Shared:WaitForChild("Config"))
+local Grid = require(Shared:WaitForChild("Grid"))
 
 local Colors = Config.Colors
 
@@ -147,6 +150,75 @@ end
 
 -- Arena -----------------------------------------------------------------------
 
+local function catalogColor(id: string): Color3
+	local entry = Catalog.find(Catalog.TileTypes, id)
+	return if entry then entry.color else Colors.TileA
+end
+
+local CONVEYOR_DIRECTIONS = {
+	Vector3.new(1, 0, 0),
+	Vector3.new(-1, 0, 0),
+	Vector3.new(0, 0, 1),
+	Vector3.new(0, 0, -1),
+}
+
+-- Non-colliding, non-queryable detail welded to a tile so it falls with it.
+local function addDecoration(tile: BasePart, props: { [string]: any })
+	local deco = makePart(props)
+	deco.Name = "Decoration"
+	deco.Anchored = false
+	deco.Massless = true
+	deco.CanCollide = false
+	deco.CanQuery = false
+	deco.CanTouch = false
+	deco.CastShadow = false
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = tile
+	weld.Part1 = deco
+	weld.Parent = deco
+	deco.Parent = tile
+end
+
+local function styleTile(tile: BasePart, tileType: string, checkerColor: Color3)
+	tile:SetAttribute("TileType", tileType)
+	local top = tile.Position.Y + tile.Size.Y / 2
+
+	if tileType == "Normal" then
+		tile.Color = checkerColor
+	elseif tileType == "Ice" then
+		tile.Material = Enum.Material.Ice
+		tile.Color = catalogColor("Ice")
+		tile.Reflectance = 0.15
+		tile.CustomPhysicalProperties = PhysicalProperties.new(0.9, Config.ICE_FRICTION, 0, 100, 1)
+	elseif tileType == "Crumble" then
+		tile.Material = Enum.Material.Sand
+		tile.Color = catalogColor("Crumble")
+	elseif tileType == "Reinforced" then
+		tile.Material = Enum.Material.DiamondPlate
+		tile.Color = catalogColor("Reinforced")
+	elseif tileType == "Bounce" then
+		tile.Color = catalogColor("Bounce")
+		addDecoration(tile, {
+			Size = Vector3.new(3.5, 0.2, 3.5),
+			CFrame = CFrame.new(tile.Position.X, top + 0.1, tile.Position.Z),
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(200, 255, 210),
+		})
+	elseif tileType == "Conveyor" then
+		local direction = CONVEYOR_DIRECTIONS[math.random(#CONVEYOR_DIRECTIONS)]
+		tile.Color = catalogColor("Conveyor")
+		tile:SetAttribute("ConveyorDirection", direction)
+		-- Glowing strip on the edge the conveyor pushes toward.
+		local edge = tile.Position + direction * (tile.Size.X / 2 - 0.5)
+		addDecoration(tile, {
+			Size = if direction.X ~= 0 then Vector3.new(1, 0.2, tile.Size.Z) else Vector3.new(tile.Size.X, 0.2, 1),
+			CFrame = CFrame.new(edge.X, top + 0.1, edge.Z),
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 240, 170),
+		})
+	end
+end
+
 function World.buildArena(): Model
 	local existing = Workspace:FindFirstChild("Arena")
 	if existing then
@@ -168,7 +240,7 @@ function World.buildArena(): Model
 
 	for x = 0, grid - 1 do
 		for z = 0, grid - 1 do
-			local color = if (x + z) % 2 == 0 then Colors.TileA else Colors.TileB
+			local checker = if (x + z) % 2 == 0 then Colors.TileA else Colors.TileB
 			local tile = makePart({
 				Name = string.format("Tile_%d_%d", x, z),
 				Size = tileSize,
@@ -178,9 +250,12 @@ function World.buildArena(): Model
 					center.Z + (z - centerOffset) * pitch
 				),
 				Material = Enum.Material.SmoothPlastic,
-				Color = color,
+				Color = checker,
 			})
 			tile:SetAttribute("State", TILE_INTACT)
+			tile:SetAttribute("GridX", x)
+			tile:SetAttribute("GridZ", z)
+			styleTile(tile, Grid.weightedPick(Config.TILE_TYPE_WEIGHTS, math.random()), checker)
 			tile.Parent = tiles
 		end
 	end
@@ -189,9 +264,14 @@ function World.buildArena(): Model
 	return model
 end
 
+function World.getTilesFolder(arena: Model?): Folder?
+	local folder = arena and arena:FindFirstChild("Tiles")
+	return if folder and folder:IsA("Folder") then folder else nil
+end
+
 local function getIntactTiles(arena: Model): { BasePart }
 	local result = {}
-	local tiles = arena:FindFirstChild("Tiles")
+	local tiles = World.getTilesFolder(arena)
 	if not tiles then
 		return result
 	end
@@ -202,6 +282,11 @@ local function getIntactTiles(arena: Model): { BasePart }
 	end
 	return result
 end
+World.getIntactTiles = getIntactTiles
+
+function World.isIntact(tile: Instance?): boolean
+	return tile ~= nil and tile.Parent ~= nil and tile:GetAttribute("State") == TILE_INTACT
+end
 
 function World.countIntactTiles(arena: Model?): number
 	if not arena then
@@ -210,22 +295,31 @@ function World.countIntactTiles(arena: Model?): number
 	return #getIntactTiles(arena)
 end
 
+-- Y of the tile tops (arena surface).
+function World.getSurfaceY(): number
+	return Config.ARENA_CENTER.Y + Config.TILE_SIZE.Y / 2
+end
+
 -- Returns `count` spawn CFrames above random distinct intact tiles (cycling if needed).
+-- Normal tiles are preferred so nobody starts on ice, a bounce pad or a crumble tile.
 function World.getSpawnCFrames(arena: Model, count: number): { CFrame }
-	local tiles = getIntactTiles(arena)
+	local all = getIntactTiles(arena)
 	local result = {}
-	if #tiles == 0 then
+	if #all == 0 then
 		for _ = 1, count do
 			table.insert(result, CFrame.new(Config.ARENA_CENTER + Vector3.new(0, 4, 0)))
 		end
 		return result
 	end
 
-	-- Fisher-Yates shuffle
-	for i = #tiles, 2, -1 do
-		local j = math.random(i)
-		tiles[i], tiles[j] = tiles[j], tiles[i]
+	local normal = {}
+	for _, tile in ipairs(all) do
+		if tile:GetAttribute("TileType") == "Normal" then
+			table.insert(normal, tile)
+		end
 	end
+	local tiles = if #normal >= count then normal else all
+	Grid.shuffle(tiles, math.random)
 
 	local lift = Config.TILE_SIZE.Y / 2 + 3
 	for i = 1, count do
@@ -235,12 +329,32 @@ function World.getSpawnCFrames(arena: Model, count: number): { CFrame }
 	return result
 end
 
-local function dropTile(tile: BasePart)
+-- Starts tile behaviours that should not run during the grace period (conveyors).
+function World.activateTiles(arena: Model?)
+	if not arena then
+		return
+	end
+	for _, tile in ipairs(getIntactTiles(arena)) do
+		local direction = tile:GetAttribute("ConveyorDirection")
+		if typeof(direction) == "Vector3" then
+			-- An anchored part with velocity moves whatever stands on it.
+			tile.AssemblyLinearVelocity = direction * Config.CONVEYOR_SPEED
+		end
+	end
+end
+
+-- Flashes a tile red for `flashTime` seconds, then drops it. Safe to call on any tile;
+-- tiles that are already falling are ignored.
+function World.dropTile(tile: BasePart, flashTime: number?)
+	if not World.isIntact(tile) then
+		return
+	end
 	tile:SetAttribute("State", TILE_FALLING)
+	local warnTime = flashTime or Config.TILE_FLASH_TIME
 
 	task.spawn(function()
-		local flashes = 3
-		local step = Config.TILE_FLASH_TIME / (flashes * 2)
+		local flashes = math.max(1, math.round(warnTime / 0.2))
+		local step = warnTime / (flashes * 2)
 		tile.Material = Enum.Material.Neon
 		for _ = 1, flashes do
 			if not tile.Parent then
@@ -259,6 +373,7 @@ local function dropTile(tile: BasePart)
 		end
 
 		tile.Color = Colors.TileWarn
+		tile.AssemblyLinearVelocity = Vector3.zero
 		tile.Anchored = false
 		pcall(function()
 			tile:SetNetworkOwner(nil)
@@ -272,19 +387,50 @@ local function dropTile(tile: BasePart)
 	end)
 end
 
--- Drops up to `count` random intact tiles. Returns how many were dropped.
-function World.dropWave(arena: Model?, count: number): number
+-- A wave picking a tile: reinforced tiles crack first and only fall the second time.
+local function hitByWave(tile: BasePart)
+	if tile:GetAttribute("TileType") == "Reinforced" and not tile:GetAttribute("Cracked") then
+		tile:SetAttribute("Cracked", true)
+		tile.Material = Enum.Material.CrackedLava
+		tile.Color = Colors.TileCracked
+		return
+	end
+	World.dropTile(tile)
+end
+
+-- Picks up to `count` intact tiles. pattern "OuterFirst" takes the outermost ring first.
+-- Returns how many tiles were hit.
+function World.dropWave(arena: Model?, count: number, pattern: string?): number
 	if not arena or not arena.Parent then
 		return 0
 	end
 	local intact = getIntactTiles(arena)
-	local dropped = 0
-	for _ = 1, math.min(count, #intact) do
-		local tile = table.remove(intact, math.random(#intact))
-		dropTile(tile)
-		dropped += 1
+	local chosen
+	if pattern == "OuterFirst" then
+		chosen = Grid.pickOuterFirst(intact, count, function(tile: BasePart)
+			local x = tonumber(tile:GetAttribute("GridX")) or 0
+			local z = tonumber(tile:GetAttribute("GridZ")) or 0
+			return Grid.ringIndex(x, z, Config.GRID_SIZE)
+		end, math.random)
+	else
+		chosen = table.move(Grid.shuffle(intact, math.random), 1, math.min(count, #intact), 1, {})
 	end
-	return dropped
+	for _, tile in ipairs(chosen) do
+		hitByWave(tile)
+	end
+	return #chosen
+end
+
+-- Intact tiles in one grid row ("X" = fixed GridX) or column ("Z" = fixed GridZ).
+function World.getLine(arena: Model, axis: string, index: number): { BasePart }
+	local result = {}
+	local attribute = if axis == "X" then "GridX" else "GridZ"
+	for _, tile in ipairs(getIntactTiles(arena)) do
+		if tile:GetAttribute(attribute) == index then
+			table.insert(result, tile)
+		end
+	end
+	return result
 end
 
 function World.destroyArena(arena: Model?)

@@ -1,12 +1,16 @@
--- Procedural HUD: top-center phase banner with timer + Alive count,
--- top-right Wins/Coins card bound to leaderstats.
+-- Procedural HUD: top-center phase banner with timer, Alive count and current mode,
+-- top-right Wins/Coins card bound to leaderstats, active power-up tray, event toasts,
+-- and a guide panel (G key or GUIDE button) that explains every mode, tile, hazard and
+-- power-up from Shared.Catalog.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Catalog = require(Shared:WaitForChild("Catalog"))
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
 local Net = require(Shared:WaitForChild("Net"))
@@ -111,12 +115,20 @@ local aliveLabel = label({
 	Position = UDim2.new(0.5, 4, 0, 54),
 })
 
+local modeLabel = label({
+	Name = "Mode",
+	Text = "PRESS G FOR THE GUIDE",
+	TextColor3 = Color3.fromRGB(200, 195, 210),
+	Size = UDim2.new(1, -24, 0, 18),
+	Position = UDim2.fromOffset(12, 84),
+})
+
 local bannerHome = UDim2.new(0.5, 0, 0, 10)
 local banner = create("Frame", {
 	Name = "PhaseBanner",
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = bannerHome,
-	Size = UDim2.fromOffset(380, 88),
+	Size = UDim2.fromOffset(420, 110),
 	BackgroundColor3 = PANEL_COLOR,
 	BackgroundTransparency = 0.2,
 	Parent = screenGui,
@@ -127,6 +139,7 @@ local banner = create("Frame", {
 	phaseLabel,
 	timerLabel,
 	aliveLabel,
+	modeLabel,
 }) :: Frame
 
 -- Top-right stats card
@@ -171,6 +184,225 @@ create("Frame", {
 	coinsValue,
 })
 
+-- Toasts (hazard warnings, pickups, mode intro) stack under the banner.
+local toastStack = create("Frame", {
+	Name = "Toasts",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 130),
+	Size = UDim2.fromOffset(480, 160),
+	BackgroundTransparency = 1,
+	Parent = screenGui,
+}, {
+	create("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}),
+}) :: Frame
+
+-- Active power-ups, under the stats card.
+local powerUpTray = create("Frame", {
+	Name = "PowerUps",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 114),
+	Size = UDim2.fromOffset(190, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	Parent = screenGui,
+}, {
+	create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }),
+}) :: Frame
+
+-- Guide panel ------------------------------------------------------------------
+
+local guideScale = create("UIScale", { Scale = 1 }) :: UIScale
+local guideList = create("ScrollingFrame", {
+	Name = "Entries",
+	Position = UDim2.fromOffset(16, 52),
+	Size = UDim2.new(1, -32, 1, -68),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 6,
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, {
+	create("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+}) :: ScrollingFrame
+
+local closeButton = create("TextButton", {
+	Name = "Close",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 12),
+	Size = UDim2.fromOffset(32, 32),
+	BackgroundColor3 = Color3.fromRGB(60, 50, 70),
+	Text = "X",
+	TextColor3 = TEXT_COLOR,
+	Font = FONT_BOLD,
+	TextSize = 18,
+}, {
+	create("UICorner", { CornerRadius = UDim.new(0, 8) }),
+}) :: TextButton
+
+local guidePanel = create("Frame", {
+	Name = "Guide",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.55),
+	Size = UDim2.new(0.9, 0, 0.7, 0),
+	BackgroundColor3 = PANEL_COLOR,
+	BackgroundTransparency = 0.08,
+	Visible = false,
+	Parent = screenGui,
+}, {
+	create("UICorner", { CornerRadius = UDim.new(0, 14) }),
+	create("UIStroke", { Thickness = 2, Color = Config.Colors.WarmNeon, Transparency = 0.2 }),
+	create("UISizeConstraint", { MaxSize = Vector2.new(600, 460) }),
+	guideScale,
+	label({
+		Name = "Title",
+		Text = "HOW TO SURVIVE",
+		Font = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, -80, 0, 30),
+		Position = UDim2.fromOffset(16, 12),
+	}),
+	closeButton,
+	guideList,
+}) :: Frame
+
+local guideButton = create("TextButton", {
+	Name = "GuideButton",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -12, 1, -12),
+	Size = UDim2.fromOffset(140, 38),
+	BackgroundColor3 = PANEL_COLOR,
+	BackgroundTransparency = 0.15,
+	Text = "GUIDE [G]",
+	TextColor3 = Config.Colors.WarmNeon,
+	Font = FONT_BOLD,
+	TextSize = 18,
+	Parent = screenGui,
+}, {
+	create("UICorner", { CornerRadius = UDim.new(0, 10) }),
+	create("UIStroke", { Thickness = 2, Color = Config.Colors.WarmNeon, Transparency = 0.3 }),
+}) :: TextButton
+
+do
+	local order = 0
+	local function nextOrder(): number
+		order += 1
+		return order
+	end
+
+	local function addText(props: { [string]: any })
+		props.TextScaled = false
+		props.TextXAlignment = Enum.TextXAlignment.Left
+		props.LayoutOrder = nextOrder()
+		props.Parent = guideList
+		label(props)
+	end
+
+	local function addHeading(text: string)
+		addText({
+			Name = "Heading",
+			Text = text,
+			Font = FONT_BOLD,
+			TextSize = 18,
+			TextColor3 = Config.Colors.WarmNeon,
+			Size = UDim2.new(1, -8, 0, 26),
+		})
+	end
+
+	local function addEntry(entry: Catalog.Entry)
+		create("Frame", {
+			Name = entry.id,
+			Size = UDim2.new(1, -8, 0, 40),
+			BackgroundTransparency = 1,
+			LayoutOrder = nextOrder(),
+			Parent = guideList,
+		}, {
+			create("Frame", {
+				Name = "Swatch",
+				Size = UDim2.fromOffset(16, 16),
+				Position = UDim2.fromOffset(2, 4),
+				BackgroundColor3 = entry.color,
+			}, { create("UICorner", { CornerRadius = UDim.new(0, 4) }) }),
+			label({
+				Name = "Name",
+				Text = entry.name,
+				Font = FONT_BOLD,
+				TextScaled = false,
+				TextSize = 15,
+				TextColor3 = entry.color,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Size = UDim2.new(0, 130, 0, 24),
+				Position = UDim2.fromOffset(26, 0),
+			}),
+			label({
+				Name = "Description",
+				Text = entry.description,
+				TextScaled = false,
+				TextSize = 14,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				Size = UDim2.new(1, -164, 1, 0),
+				Position = UDim2.fromOffset(160, 3),
+			}),
+		})
+	end
+
+	addHeading("GOAL")
+	addText({
+		Name = "Goal",
+		Text = string.format(
+			"Stay on the arena until the timer ends or you're the last one standing. "
+				.. "Survivors earn +%d Win and +%d Coins. Tiles flash red before they fall.",
+			Config.WIN_REWARD,
+			Config.COIN_REWARD
+		),
+		TextSize = 14,
+		TextWrapped = true,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Size = UDim2.new(1, -8, 0, 40),
+	})
+	for _, section in ipairs({
+		{ "GAME MODES (one per round, in rotation)", Catalog.Modes },
+		{ "TILES", Catalog.TileTypes },
+		{ "HAZARDS", Catalog.Hazards },
+		{ "POWER-UPS (touch the glowing orbs)", Catalog.PowerUps },
+	}) do
+		addHeading(section[1] :: string)
+		for _, entry in ipairs(section[2] :: { Catalog.Entry }) do
+			addEntry(entry)
+		end
+	end
+end
+
+local function setGuideOpen(open: boolean)
+	if open then
+		guidePanel.Visible = true
+		guideScale.Scale = 0.85
+		TweenService:Create(guideScale, SMOOTH, { Scale = 1 }):Play()
+	else
+		guidePanel.Visible = false
+	end
+end
+
+guideButton.Activated:Connect(function()
+	setGuideOpen(not guidePanel.Visible)
+end)
+closeButton.Activated:Connect(function()
+	setGuideOpen(false)
+end)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.G then
+		setGuideOpen(not guidePanel.Visible)
+	end
+end)
+
 screenGui.Parent = playerGui
 
 -- The stats card replaces the default top-right player list, which would overlap it.
@@ -212,6 +444,142 @@ local function transitionTo(phase: string)
 	TweenService:Create(bannerStroke, SMOOTH, { Color = color }):Play()
 end
 
+-- Toasts ------------------------------------------------------------------------
+
+local MAX_TOASTS = 4
+local toastOrder = 0
+
+local function showToast(text: string, color: Color3?, duration: number?)
+	toastOrder += 1
+	local accent = color or TEXT_COLOR
+	local textLabel = label({
+		Name = "Text",
+		Text = text,
+		Font = FONT_BOLD,
+		TextColor3 = accent,
+		TextTransparency = 1,
+		Size = UDim2.new(1, -20, 1, -8),
+		Position = UDim2.fromOffset(10, 4),
+	})
+	local stroke = create("UIStroke", { Thickness = 1.5, Color = accent, Transparency = 1 }) :: UIStroke
+	local frame = create("Frame", {
+		Name = "Toast",
+		Size = UDim2.fromOffset(480, 32),
+		BackgroundColor3 = PANEL_COLOR,
+		BackgroundTransparency = 1,
+		LayoutOrder = toastOrder,
+		Parent = toastStack,
+	}, {
+		create("UICorner", { CornerRadius = UDim.new(0, 8) }),
+		stroke,
+		textLabel,
+	}) :: Frame
+
+	-- Keep only the newest few.
+	local toasts = {}
+	for _, child in ipairs(toastStack:GetChildren()) do
+		if child:IsA("Frame") then
+			table.insert(toasts, child)
+		end
+	end
+	if #toasts > MAX_TOASTS then
+		table.sort(toasts, function(a, b)
+			return a.LayoutOrder < b.LayoutOrder
+		end)
+		for i = 1, #toasts - MAX_TOASTS do
+			toasts[i]:Destroy()
+		end
+	end
+
+	TweenService:Create(frame, FAST, { BackgroundTransparency = 0.25 }):Play()
+	TweenService:Create(textLabel, FAST, { TextTransparency = 0 }):Play()
+	TweenService:Create(stroke, FAST, { Transparency = 0.2 }):Play()
+	task.delay(duration or 2.5, function()
+		if not frame.Parent then
+			return
+		end
+		TweenService:Create(frame, SMOOTH, { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(textLabel, SMOOTH, { TextTransparency = 1 }):Play()
+		TweenService:Create(stroke, SMOOTH, { Transparency = 1 }):Play()
+		task.wait(0.5)
+		frame:Destroy()
+	end)
+end
+
+-- Power-up tray -----------------------------------------------------------------
+
+local activePowerUps: { [string]: { row: TextLabel, expires: number? } } = {}
+
+local function removePowerUp(id: string)
+	local active = activePowerUps[id]
+	if active then
+		active.row:Destroy()
+		activePowerUps[id] = nil
+	end
+end
+
+local function powerUpText(id: string, expires: number?): string
+	local info = Catalog.find(Catalog.PowerUps, id)
+	local name = string.upper(if info then info.name else id)
+	if expires then
+		return string.format("%s  %ds", name, math.max(0, math.ceil(expires - os.clock())))
+	end
+	return name .. "  READY"
+end
+
+local function addPowerUp(id: string, duration: number?)
+	removePowerUp(id)
+	local info = Catalog.find(Catalog.PowerUps, id)
+	local color = if info then info.color else TEXT_COLOR
+	local expires = if duration then os.clock() + duration else nil
+	local row = label({
+		Name = id,
+		Text = powerUpText(id, expires),
+		Font = FONT_BOLD,
+		TextColor3 = color,
+		BackgroundColor3 = PANEL_COLOR,
+		BackgroundTransparency = 0.2,
+		Size = UDim2.new(1, 0, 0, 28),
+	})
+	create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = row })
+	create("UIStroke", { Thickness = 1.5, Color = color, Transparency = 0.3, Parent = row })
+	row.Parent = powerUpTray
+	activePowerUps[id] = { row = row, expires = expires }
+	pulse(row)
+end
+
+task.spawn(function()
+	while true do
+		for id, active in pairs(activePowerUps) do
+			if active.expires then
+				active.row.Text = powerUpText(id, active.expires)
+			end
+		end
+		task.wait(0.25)
+	end
+end)
+
+local function onGameEvent(data: any)
+	if type(data) ~= "table" then
+		return
+	end
+	if data.kind == "Toast" and type(data.text) == "string" then
+		showToast(data.text, if typeof(data.color) == "Color3" then data.color else nil, tonumber(data.duration))
+	elseif data.kind == "PowerUp" and type(data.id) == "string" then
+		if data.active then
+			addPowerUp(data.id, tonumber(data.duration))
+		else
+			removePowerUp(data.id)
+		end
+	elseif data.kind == "PowerUpClear" then
+		for id in pairs(activePowerUps) do
+			removePowerUp(id)
+		end
+	end
+end
+
+Net.getGameEvent().OnClientEvent:Connect(onGameEvent)
+
 -- Round state -----------------------------------------------------------------
 
 local currentPhase: string? = nil
@@ -244,6 +612,16 @@ local function applyState(data: any)
 		aliveLabel.Text = string.format("PLAYERS: %d", playerCount)
 	end
 
+	local modeInfo = Catalog.find(Catalog.Modes, data.mode)
+	if not modeInfo or phase == Phases.Waiting then
+		modeLabel.Text = "PRESS G FOR THE GUIDE"
+		modeLabel.TextColor3 = Color3.fromRGB(200, 195, 210)
+	else
+		local prefix = if phase == Phases.Intermission then "NEXT MODE: " else "MODE: "
+		modeLabel.Text = prefix .. string.upper(modeInfo.name) .. "  |  G FOR GUIDE"
+		modeLabel.TextColor3 = modeInfo.color
+	end
+
 	if phase ~= currentPhase then
 		currentPhase = phase
 		transitionTo(phase)
@@ -256,6 +634,8 @@ end
 local roundStateEvent = Net.getRoundStateEvent()
 roundStateEvent.OnClientEvent:Connect(applyState)
 roundStateEvent:FireServer() -- request a snapshot (late join / HUD restart)
+
+showToast("Welcome! Press G or click GUIDE to learn the tiles, hazards and power-ups.", Config.Colors.WarmNeon, 6)
 
 -- Leaderstats -----------------------------------------------------------------
 
