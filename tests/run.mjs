@@ -1,7 +1,8 @@
 // Runs the standalone Luau tests: node tests/run.mjs
 // Each test runs in a temp dir holding copies of the src/Shared modules it requires.
 // Roblox datatypes (Vector3, Color3) are prepended as local stubs, because the Luau CLI
-// sandboxes each module's globals.
+// sandboxes each module's globals, and `require(script.Parent:WaitForChild("X"))` is
+// rewritten to `require("./X")`.
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +21,12 @@ let failed = false;
 for (const test of readdirSync(join(root, "tests")).filter((f) => f.endsWith(".test.luau"))) {
 	const dir = mkdtempSync(join(tmpdir(), "ft-test-"));
 	for (const module of readdirSync(shared).filter((f) => f.endsWith(".luau"))) {
-		writeFileSync(join(dir, module), stubs + readFileSync(join(shared, module), "utf8"));
+		// Sibling requires (Roblox style) become path requires for the Luau CLI.
+		const source = readFileSync(join(shared, module), "utf8").replace(
+			/require\(script\.Parent:WaitForChild\("(\w+)"\)\)/g,
+			'require("./$1")',
+		);
+		writeFileSync(join(dir, module), stubs + source);
 	}
 	copyFileSync(join(root, "tests", test), join(dir, test));
 	try {

@@ -16,8 +16,8 @@ node tests/run.mjs                    # standalone Luau tests (needs `luau` on P
 
 | Instance | Source |
 | --- | --- |
-| `ReplicatedStorage.Shared` | `src/Shared` (Config, Catalog, Grid, Net, Format) |
-| `ServerScriptService.Server` | `src/Server` (GameLoop, World, Environment, TileEffects, Hazards, PowerUps, Impulse, PlayerData) |
+| `ReplicatedStorage.Shared` | `src/Shared` (Config, Catalog, Grid, Progression, Net, Format) |
+| `ServerScriptService.Server` | `src/Server` (GameLoop, World, Environment, TileEffects, Hazards, PowerUps, Impulse, RoundStats, PlayerData) |
 | `StarterPlayer.StarterPlayerScripts.Client` | `src/Client` (Hud) |
 
 ## Round flow
@@ -43,6 +43,13 @@ In game, press **G** or click **GUIDE** for descriptions of everything. Names an
 - Rounds that **start with 2+ players** end when 0 or 1 players remain, or at 60s.
 - Rounds that **start with 1 player** (e.g. solo Play in Studio) do *not* end just because one player is alive. They end when that player is eliminated or when the 60s timer runs out; surviving the full minute counts as a win.
 
-## Data
+## Data and progression
 
-Wins and Coins live in `leaderstats`. Persistence uses the `FallingTilesStats_v1` DataStore; every DataStore call is wrapped in `pcall`. If DataStores are unavailable (e.g. Studio without API access) stats stay session-only, and a player whose load failed is never saved so stored data isn't overwritten.
+Wins, Coins and Level show in `leaderstats`. They mirror a server-side profile that also holds XP, lifetime stats, daily quests, achievements and streaks (`src/Shared/Progression.luau`). Press **P** in game for the progress panel. [FEATURES.md](FEATURES.md) lists the rules and rewards.
+
+Persistence still uses the `FallingTilesStats_v1` DataStore with the same key, so v1 `{Wins, Coins}` data migrates to schema v2 when it's loaded.
+- Every DataStore call is wrapped in `pcall`.
+- If DataStores are unavailable (e.g. Studio without API access), profiles stay session-only.
+- A player whose load failed is never saved, so stored data isn't overwritten.
+- Saves use `UpdateAsync` and never replace data from a newer schema.
+- Round results that arrive while a profile is loading are queued until it loads, and each round is applied at most once.

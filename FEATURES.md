@@ -85,3 +85,47 @@ How the new pieces interact with earlier features:
 - **Gusts** add to the player's current horizontal velocity for 0.4s through a planar `LinearVelocity`. The strength (28 studs/s) is untuned.
 - **Islands gaps** are 8 studs. A default running jump should clear them, but that hasn't been checked in-game.
 - **Pyramid steps** are 1.5 studs high, so players have to jump up each ring.
+
+## Batch 3: progression
+
+All progress comes from real rounds, and the server computes it. The client only displays the "Progress" attribute and toasts. The rules live in the pure module `Shared/Progression.luau`, which the server, the HUD and the tests all share.
+
+| # | Feature | Category | Where | Verification |
+| --- | --- | --- | --- | --- |
+| 34 | **XP and levels**: XP for playing, every 10s survived, winning, power-ups and rescues, with a per-round breakdown. Each level needs 25 more XP than the last (100 for level 2), max level 50. `Level` is shown in leaderstats | Progression | `Progression.roundXp`, `levelInfo` | Static; level curve, cap and round XP unit-tested |
+| 35 | **Level-up rewards**: 10 Coins x the new level, +50 every 5th level, paid automatically | Reward | `Progression.levelReward` | Static; unit-tested |
+| 36 | **Win streak bonus**: +10 XP per consecutive win beyond the first (max +40); a loss resets it, and the best streak is kept | Progression | `Progression.recordRound` | Static; unit-tested |
+| 37 | **Daily quests**: 3 of 8 quest templates per UTC day, chosen deterministically per player (the same on every server), progressed by round results and paid automatically when done | Quest | `Progression.questsFor`, `refreshQuests` | Static; determinism, rollover, completion and no-repeat unit-tested |
+| 38 | **Achievements**: 12 one-time goals with Coin rewards (wins, rounds, time survived, power-ups, bounces, rescues, full rounds, best streak, win on every map, win in every environment, level 10) | Achievement | `Progression.checkAchievements` | Static; unlocks, no double grant, World Tour unit-tested |
+| 39 | **Daily login streak**: Coins on the first session of each UTC day, rising over 7 days and reset by a missed day | Reward | `Progression.checkIn` | Static; same-day protection, growth, cap, reset unit-tested |
+| 40 | **Lifetime stats**: rounds played, time survived, best round, power-ups, bounces, rescues, full rounds, wins per map and per environment | Progression | `Progression.recordRound`, `RoundStats` | Static; unit-tested |
+| 41 | **Level + XP bar** on the stats card | HUD | `Hud.client.luau` | Static |
+| 42 | **Progress panel** (P key or PROGRESS button): level and next reward, streaks, daily quests with bars, rewards and a reset countdown, achievements with progress, lifetime stats. Opening it closes the guide and vice versa | HUD | `Hud.client.luau` | Static |
+| 43 | **Progress toasts**: round XP breakdown, level-up, quest complete, achievement unlocked, daily streak | HUD | `PlayerData.announce` | Static |
+| 44 | **Guide PROGRESSION section** explaining XP sources (numbers from Config), win streaks, quests, achievements and the daily streak | HUD | `Hud.client.luau` | Static |
+
+Count for this batch: 11 features (7 progression/reward systems, 4 HUD). Quests and achievements each count as one feature even though they have 8 and 12 entries. Cumulative: **44** (33 + 11).
+
+Persistence and safety changes (supporting, not counted):
+- **Schema v2** with migration (`Progression.migrate`):
+  - It uses the same DataStore name and key as before, so existing Wins and Coins carry over.
+  - v1 `{Wins, Coins}` data gets defaults for everything new.
+  - Invalid numbers become 0, and unknown achievement and quest ids are dropped.
+  - Data written by a newer schema is flagged, and that session is never saved.
+  - Achievements already met by migrated data unlock on load. For example, a v1 player with wins gets First Victory.
+- **Saves use `UpdateAsync`**, and the update function refuses to replace newer-schema data. Every DataStore call is still inside `pcall`.
+- **A failed load means no saves** for that session, as before, and also no login reward, because it could never be saved and rejoining would grant it again.
+  - In Studio, or when DataStores are unavailable, profiles are session-only and the login reward is granted every session.
+- **Round results that arrive while the profile is loading are queued** and applied after the load. The old code added session stats on top of loaded data, which could have given rewards twice; that is replaced.
+- **Each round result is applied at most once:**
+  - `RoundStats.finalize` only returns one summary per player per round.
+  - `PlayerData` tracks the round ids it has applied this session.
+  - The profile stores `LastRoundId`, and `recordRound` rejects a repeat of it.
+- **Leaving mid-round forfeits that round's progress.** Elimination finalizes the round as a loss, and survivors finalize it as a win. The previous Wins/Coins award is folded into the same single profile update.
+
+### Batch 3 risks to check in Studio
+
+- **Quick deaths still earn XP:** eliminations during the 3s countdown still give participation XP, so a solo player who keeps dying instantly still earns about 10 XP per cycle. This is intentional so solo play progresses, but it could be farmed slowly.
+- **Daily resets use the server clock:** the UTC day comes from `os.time()` on the server, and the HUD countdown uses the client's clock, so they can disagree by however much the clocks differ.
+- **Saves:** there's one `UpdateAsync` per player per round (roughly one every 75s), plus on leave and shutdown. That's inside normal DataStore limits, but rejoining quickly between servers has no session lock, so the last write wins.
+- **HUD size:** the progress panel rebuilds its rows on every update. That's fine at this size (about 30 rows).

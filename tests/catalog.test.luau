@@ -128,6 +128,36 @@ check("rescue above max lava", rescueHeight(maxLava) > maxLava)
 check("rescue below tile bottoms", rescueHeight(maxLava) < tileBottom)
 check("rescue above kill plane", rescueHeight(Config.KILL_PLANE_Y) > Config.KILL_PLANE_Y)
 
+-- Quests and achievements have player-facing text and valid settings.
+check("quest pool covers a day", #Config.QUEST_POOL >= Config.QUESTS_PER_DAY)
+check("quest catalog size", #Catalog.Quests == #Config.QUEST_POOL)
+local knownMetrics = {
+	RoundsPlayed = true, RoundsWon = true, SecondsSurvived = true, PowerUps = true,
+	Bounces = true, Rescues = true, FullRounds = true, ModifierRounds = true,
+}
+for _, quest in ipairs(Config.QUEST_POOL) do
+	check("quest in catalog: " .. quest.id, Catalog.find(Catalog.Quests, quest.id) ~= nil)
+	check("quest metric known: " .. quest.id, knownMetrics[quest.metric] == true)
+	check("quest rewards: " .. quest.id, quest.goal > 0 and quest.coins > 0 and quest.xp > 0)
+end
+check("achievement catalog size", #Catalog.Achievements == #Config.ACHIEVEMENTS)
+local knownStats = {
+	Wins = true, RoundsPlayed = true, SecondsSurvived = true, PowerUps = true, Bounces = true,
+	Rescues = true, FullRounds = true, BestWinStreak = true,
+}
+for _, def in ipairs(Config.ACHIEVEMENTS) do
+	check("achievement in catalog: " .. def.id, Catalog.find(Catalog.Achievements, def.id) ~= nil)
+	check("achievement coins: " .. def.id, def.coins > 0)
+	if def.kind == "stat" then
+		check("achievement stat known: " .. def.id, knownStats[def.stat] == true and def.goal > 0)
+	elseif def.kind == "level" then
+		check("achievement level reachable: " .. def.id, def.goal > 1 and def.goal <= Config.MAX_LEVEL)
+	else
+		check("achievement kind known: " .. def.id, def.kind == "allMaps" or def.kind == "allEnvironments")
+	end
+end
+check("login rewards", #Config.LOGIN_STREAK_REWARDS >= 1)
+
 if failures > 0 then
 	error(failures .. " catalog test(s) failed")
 end

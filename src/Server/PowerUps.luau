@@ -10,6 +10,7 @@ local Catalog = require(Shared:WaitForChild("Catalog"))
 local Config = require(Shared:WaitForChild("Config"))
 local Net = require(Shared:WaitForChild("Net"))
 
+local RoundStats = require(script.Parent:WaitForChild("RoundStats"))
 local World = require(script.Parent:WaitForChild("World"))
 
 local gameEvent = Net.getGameEvent()
@@ -203,6 +204,7 @@ function PowerUps.tick(players: { Player }, now: number)
 					local id = pickup.id
 					removePickup(index)
 					grant(player, id)
+					RoundStats.note(player, "powerUps")
 					break
 				end
 			end
@@ -244,6 +246,7 @@ function PowerUps.tryRescue(player: Player, killY: number): boolean
 	end
 
 	mine.Wing = nil
+	RoundStats.note(player, "rescues")
 	root.AssemblyLinearVelocity = Vector3.zero
 	character:PivotTo(World.getSpawnCFrames(arena, 1)[1])
 	gameEvent:FireClient(player, { kind = "PowerUp", id = "Wing", active = false })

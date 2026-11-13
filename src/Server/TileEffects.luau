@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
 local Impulse = require(script.Parent:WaitForChild("Impulse"))
+local RoundStats = require(script.Parent:WaitForChild("RoundStats"))
 local World = require(script.Parent:WaitForChild("World"))
 
 local TileEffects = {}
@@ -45,6 +46,7 @@ function TileEffects.tick(arena: Model?, players: { Player }, now: number)
 				if tileType == "Bounce" then
 					if now - (lastBounce[player] or 0) >= Config.BOUNCE_COOLDOWN then
 						lastBounce[player] = now
+						RoundStats.note(player, "bounces")
 						local flat = root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
 						Impulse.apply(character, flat + Vector3.new(0, Config.BOUNCE_VELOCITY, 0))
 					end

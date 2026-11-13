@@ -1,8 +1,8 @@
 -- Player-facing names, colours and descriptions for modes, tile types, hazards and
 -- power-ups. The server uses the colours for world visuals; the HUD guide renders
 -- everything here, so every gameplay feature is explained in-game.
--- Ids must match Config (TILE_TYPE_WEIGHTS, Modes, Maps, Environments, Modifiers and their
--- *_ORDER lists); tests/catalog.test.luau checks this.
+-- Ids must match Config (TILE_TYPE_WEIGHTS, Modes, Maps, Environments, Modifiers, their
+-- *_ORDER lists, QUEST_POOL and ACHIEVEMENTS); tests/catalog.test.luau checks this.
 
 export type Entry = {
 	id: string,
@@ -205,6 +205,134 @@ Catalog.Modifiers = {
 		name = "Ice Age",
 		color = Color3.fromRGB(190, 240, 255),
 		description = "Every normal tile is ice. Survivors get +5 bonus Coins.",
+	},
+} :: { Entry }
+
+-- Daily quest names (goals and rewards live in Config.QUEST_POOL).
+Catalog.Quests = {
+	{
+		id = "PlayRounds",
+		name = "Regular",
+		color = Color3.fromRGB(150, 210, 255),
+		description = "Play 3 rounds.",
+	},
+	{
+		id = "WinRound",
+		name = "Winner",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Win a round.",
+	},
+	{
+		id = "Survive120",
+		name = "Stayer",
+		color = Color3.fromRGB(120, 235, 140),
+		description = "Survive 120 seconds in total.",
+	},
+	{
+		id = "CollectPowerUps",
+		name = "Grabber",
+		color = Color3.fromRGB(80, 220, 255),
+		description = "Collect 3 power-ups.",
+	},
+	{
+		id = "BounceAround",
+		name = "Boing",
+		color = Color3.fromRGB(90, 230, 120),
+		description = "Use bounce pads 5 times.",
+	},
+	{
+		id = "FullRound",
+		name = "Iron Will",
+		color = Color3.fromRGB(255, 150, 60),
+		description = "Survive a full 60s round.",
+	},
+	{
+		id = "ModifierRounds",
+		name = "Mix It Up",
+		color = Color3.fromRGB(200, 140, 255),
+		description = "Play 2 rounds with a modifier.",
+	},
+	{
+		id = "GetRescued",
+		name = "Close Call",
+		color = Color3.fromRGB(255, 230, 120),
+		description = "Get saved by a Rescue Wing.",
+	},
+} :: { Entry }
+
+-- Achievement names (conditions and rewards live in Config.ACHIEVEMENTS).
+Catalog.Achievements = {
+	{
+		id = "FirstWin",
+		name = "First Victory",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Win your first round.",
+	},
+	{
+		id = "TenWins",
+		name = "Champion",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Win 10 rounds.",
+	},
+	{
+		id = "Veteran",
+		name = "Veteran",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Play 25 rounds.",
+	},
+	{
+		id = "Marathon",
+		name = "Marathon",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Survive 30 minutes in total.",
+	},
+	{
+		id = "Collector",
+		name = "Collector",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Collect 25 power-ups.",
+	},
+	{
+		id = "Bouncy",
+		name = "Bouncy",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Use bounce pads 50 times.",
+	},
+	{
+		id = "SecondChance",
+		name = "Second Chance",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Get saved by a Rescue Wing.",
+	},
+	{
+		id = "Untouchable",
+		name = "Untouchable",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Survive a full 60s round.",
+	},
+	{
+		id = "HotStreak",
+		name = "Hot Streak",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Win 3 rounds in a row.",
+	},
+	{
+		id = "WorldTour",
+		name = "World Tour",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Win on every map.",
+	},
+	{
+		id = "AllWeather",
+		name = "All Weather",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Win in every environment.",
+	},
+	{
+		id = "Level10",
+		name = "Rising Star",
+		color = Color3.fromRGB(255, 214, 110),
+		description = "Reach level 10.",
 	},
 } :: { Entry }
 

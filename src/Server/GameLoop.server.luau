@@ -18,6 +18,7 @@
 -- Special tiles, hazards, power-ups, gusts, lava and regrowth only act during Survive.
 
 local CollectionService = game:GetService("CollectionService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -33,6 +34,7 @@ local Environment = require(script.Parent:WaitForChild("Environment"))
 local Hazards = require(script.Parent:WaitForChild("Hazards"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local PowerUps = require(script.Parent:WaitForChild("PowerUps"))
+local RoundStats = require(script.Parent:WaitForChild("RoundStats"))
 local TileEffects = require(script.Parent:WaitForChild("TileEffects"))
 local World = require(script.Parent:WaitForChild("World"))
 
@@ -142,6 +144,11 @@ local function eliminate(player: Player)
 	setAlive(player, false)
 	PowerUps.clear(player)
 	TileEffects.forget(player)
+	-- Progression: an eliminated participant finishes the round as a loss (once).
+	local summary = RoundStats.finalize(player, false, os.clock())
+	if summary then
+		PlayerData.recordRound(player, summary)
+	end
 	if roundActive then
 		setState({ alive = countAlive() })
 	end
@@ -182,6 +189,7 @@ local function onPlayerAdded(player: Player)
 end
 
 local function onPlayerRemoving(player: Player)
+	RoundStats.forget(player) -- leaving forfeits the round's progression
 	eliminate(player)
 	participants[player] = nil
 	PlayerData.release(player)
@@ -351,6 +359,7 @@ local function cleanupRound()
 	PowerUps.endRound()
 	TileEffects.reset()
 	Environment.clear()
+	RoundStats.clear()
 	for player in pairs(participants) do
 		setAlive(player, false)
 	end
@@ -404,6 +413,16 @@ local function runRound(plan: RoundPlan)
 
 	local total = countAlive()
 	roundActive = true
+	local roundPlayers = {}
+	for player in pairs(participants) do
+		table.insert(roundPlayers, player)
+	end
+	RoundStats.begin(HttpService:GenerateGUID(false), {
+		map = plan.map,
+		environment = plan.environment,
+		modifier = plan.modifier,
+		bonusCoins = modifier.bonusCoins,
+	}, roundPlayers, Config.ROUND_TIME)
 
 	-- Grace period: no tiles fall yet.
 	for remaining = Config.GRACE_TIME, 1, -1 do
@@ -441,6 +460,7 @@ local function runRound(plan: RoundPlan)
 
 	local powerUpInterval = mode.powerUpInterval * modifier.powerUpIntervalScale
 	local startTime = os.clock()
+	RoundStats.markSurviveStart(startTime)
 	local nextWaveAt = startTime
 	local nextHazardAt = startTime + mode.firstHazardAt
 	local nextPowerUpAt = startTime + powerUpInterval / 2
@@ -505,8 +525,13 @@ local function runRound(plan: RoundPlan)
 	end
 
 	local winnerNames = {}
+	local endTime = os.clock()
 	for _, player in ipairs(winners) do
-		PlayerData.award(player, Config.WIN_REWARD, Config.COIN_REWARD + modifier.bonusCoins)
+		-- Wins, Coins (incl. modifier bonus), XP, quests and achievements in one update.
+		local summary = RoundStats.finalize(player, true, endTime)
+		if summary then
+			PlayerData.recordRound(player, summary)
+		end
 		table.insert(winnerNames, player.DisplayName)
 	end
 

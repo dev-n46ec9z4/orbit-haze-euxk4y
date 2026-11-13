@@ -223,6 +223,51 @@ Config.Modifiers = {
 Config.REGROW_TIME = 1.2 -- seconds a regrowing tile stays ghosted before it becomes solid
 Config.REGROW_CLEARANCE = 5 -- studs (XZ) a regrowing slot must be from any player
 
+-- Progression (see Shared/Progression.luau). All XP/coin amounts are granted by the server.
+Config.XP_PARTICIPATION = 10 -- every round you were in
+Config.XP_PER_10_SECONDS = 4 -- survival time during Survive
+Config.XP_WIN = 40
+Config.XP_PER_POWERUP = 3
+Config.XP_PER_RESCUE = 5
+Config.XP_STREAK_STEP = 10 -- extra XP per consecutive win beyond the first
+Config.XP_STREAK_MAX = 40
+Config.XP_LEVEL_BASE = 100 -- XP from level 1 to 2; each later level needs XP_LEVEL_STEP more
+Config.XP_LEVEL_STEP = 25
+Config.MAX_LEVEL = 50
+Config.LEVEL_REWARD_COINS = 10 -- x the new level
+Config.LEVEL_MILESTONE_EVERY = 5
+Config.LEVEL_MILESTONE_COINS = 50
+Config.LOGIN_STREAK_REWARDS = { 10, 15, 20, 25, 30, 40, 60 } -- coins for day 1..7+ of a streak
+Config.QUESTS_PER_DAY = 3
+
+-- Daily quest templates. metric is a per-round amount (see Progression.questMetric).
+Config.QUEST_POOL = {
+	{ id = "PlayRounds", metric = "RoundsPlayed", goal = 3, coins = 30, xp = 40 },
+	{ id = "WinRound", metric = "RoundsWon", goal = 1, coins = 40, xp = 50 },
+	{ id = "Survive120", metric = "SecondsSurvived", goal = 120, coins = 35, xp = 40 },
+	{ id = "CollectPowerUps", metric = "PowerUps", goal = 3, coins = 30, xp = 30 },
+	{ id = "BounceAround", metric = "Bounces", goal = 5, coins = 25, xp = 30 },
+	{ id = "FullRound", metric = "FullRounds", goal = 1, coins = 60, xp = 60 },
+	{ id = "ModifierRounds", metric = "ModifierRounds", goal = 2, coins = 30, xp = 35 },
+	{ id = "GetRescued", metric = "Rescues", goal = 1, coins = 30, xp = 30 },
+}
+
+-- One-time achievements. kind: "stat" (Stats[stat] or Wins), "allMaps", "allEnvironments", "level".
+Config.ACHIEVEMENTS = {
+	{ id = "FirstWin", kind = "stat", stat = "Wins", goal = 1, coins = 50 },
+	{ id = "TenWins", kind = "stat", stat = "Wins", goal = 10, coins = 150 },
+	{ id = "Veteran", kind = "stat", stat = "RoundsPlayed", goal = 25, coins = 100 },
+	{ id = "Marathon", kind = "stat", stat = "SecondsSurvived", goal = 1800, coins = 150 },
+	{ id = "Collector", kind = "stat", stat = "PowerUps", goal = 25, coins = 100 },
+	{ id = "Bouncy", kind = "stat", stat = "Bounces", goal = 50, coins = 75 },
+	{ id = "SecondChance", kind = "stat", stat = "Rescues", goal = 1, coins = 50 },
+	{ id = "Untouchable", kind = "stat", stat = "FullRounds", goal = 1, coins = 75 },
+	{ id = "HotStreak", kind = "stat", stat = "BestWinStreak", goal = 3, coins = 100 },
+	{ id = "WorldTour", kind = "allMaps", goal = 0, coins = 200 },
+	{ id = "AllWeather", kind = "allEnvironments", goal = 0, coins = 200 },
+	{ id = "Level10", kind = "level", goal = 10, coins = 150 },
+}
+
 Config.Phases = {
 	Waiting = "Waiting",
 	Intermission = "Intermission",
