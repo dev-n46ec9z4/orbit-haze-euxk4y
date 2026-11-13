@@ -24,6 +24,7 @@ local pickups: { Pickup } = {}
 local effects: { [Player]: Effects } = {}
 local originals: { [Player]: Original } = {}
 local currentArena: Model? = nil
+local maxActive = Config.POWERUP_MAX_ACTIVE
 
 local function entry(id: string)
 	return Catalog.find(Catalog.PowerUps, id)
@@ -106,15 +107,17 @@ local function removePickup(index: number)
 	end
 end
 
-function PowerUps.startRound(arena: Model)
+-- `maxPickups` lets round modifiers (Power Surge) raise the on-arena cap.
+function PowerUps.startRound(arena: Model, maxPickups: number?)
 	PowerUps.endRound()
 	currentArena = arena
+	maxActive = maxPickups or Config.POWERUP_MAX_ACTIVE
 end
 
 -- Spawns one random pickup on a free intact tile. Returns true if one was placed.
 function PowerUps.spawnPickup(): boolean
 	local arena = currentArena
-	if not arena or not arena.Parent or #pickups >= Config.POWERUP_MAX_ACTIVE then
+	if not arena or not arena.Parent or #pickups >= maxActive then
 		return false
 	end
 
@@ -134,7 +137,7 @@ function PowerUps.spawnPickup(): boolean
 
 	local tile = free[math.random(#free)]
 	local info = Catalog.PowerUps[math.random(#Catalog.PowerUps)]
-	local base = Vector3.new(tile.Position.X, World.getSurfaceY() + 2.5, tile.Position.Z)
+	local base = Vector3.new(tile.Position.X, World.getTileTop(tile) + 2.5, tile.Position.Z)
 
 	local part = Instance.new("Part")
 	part.Name = "PowerUp_" .. info.id
@@ -218,9 +221,11 @@ function PowerUps.tick(players: { Player }, now: number)
 	end
 end
 
--- Rescue Wing: called every Heartbeat for alive players during a round. Returns true
--- if the player was rescued (so the kill plane should leave them alone).
-function PowerUps.tryRescue(player: Player): boolean
+-- Rescue Wing: called every Heartbeat for alive players during a round, before the
+-- kill check. Triggers RESCUE_DROP_DEPTH below the arena, or 3 studs above the current
+-- kill height if that is higher (Volcano lava), so the save always happens first.
+-- Returns true if the player was rescued.
+function PowerUps.tryRescue(player: Player, killY: number): boolean
 	local mine = effects[player]
 	local arena = currentArena
 	if not mine or not mine.Wing or not arena then
@@ -231,7 +236,7 @@ function PowerUps.tryRescue(player: Player): boolean
 	if not root or not root:IsA("BasePart") then
 		return false
 	end
-	if root.Position.Y > Config.ARENA_CENTER.Y - Config.RESCUE_DROP_DEPTH then
+	if root.Position.Y > PowerUps.rescueHeight(killY) then
 		return false
 	end
 	if World.countIntactTiles(arena) == 0 then
@@ -245,6 +250,10 @@ function PowerUps.tryRescue(player: Player): boolean
 	local info = entry("Wing")
 	toastAll(player.DisplayName .. " was saved by a Rescue Wing!", info and info.color)
 	return true
+end
+
+function PowerUps.rescueHeight(killY: number): number
+	return math.max(Config.ARENA_CENTER.Y - Config.RESCUE_DROP_DEPTH, killY + 3)
 end
 
 -- Removes every buff from a player (elimination, leaving, or round end).

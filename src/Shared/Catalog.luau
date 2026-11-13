@@ -1,7 +1,8 @@
 -- Player-facing names, colours and descriptions for modes, tile types, hazards and
 -- power-ups. The server uses the colours for world visuals; the HUD guide renders
 -- everything here, so every gameplay feature is explained in-game.
--- Ids must match Config (TILE_TYPE_WEIGHTS, Modes, MODE_ORDER); tests/catalog.test.luau checks this.
+-- Ids must match Config (TILE_TYPE_WEIGHTS, Modes, Maps, Environments, Modifiers and their
+-- *_ORDER lists); tests/catalog.test.luau checks this.
 
 export type Entry = {
 	id: string,
@@ -111,6 +112,99 @@ Catalog.PowerUps = {
 		name = "Rescue Wing",
 		color = Color3.fromRGB(255, 230, 120),
 		description = "If you fall, you're carried back onto a tile once. Lasts until used or the round ends.",
+	},
+} :: { Entry }
+
+Catalog.Maps = {
+	{
+		id = "Square",
+		name = "Square",
+		color = Color3.fromRGB(88, 170, 255),
+		description = "The full 10x10 floor.",
+	},
+	{
+		id = "Donut",
+		name = "Donut",
+		color = Color3.fromRGB(255, 160, 200),
+		description = "The middle is a hole. Don't get pushed in.",
+	},
+	{
+		id = "Cross",
+		name = "Cross",
+		color = Color3.fromRGB(120, 220, 255),
+		description = "Two wide bridges crossing in the middle, with no corners.",
+	},
+	{
+		id = "Islands",
+		name = "Islands",
+		color = Color3.fromRGB(110, 230, 170),
+		description = "Nine islands with one-tile gaps between them. Jump across before yours sinks.",
+	},
+	{
+		id = "Pyramid",
+		name = "Pyramid",
+		color = Color3.fromRGB(240, 200, 110),
+		description = "Each ring sits higher than the last. Jump up the steps to the peak. No sweepers here.",
+	},
+} :: { Entry }
+
+Catalog.Environments = {
+	{
+		id = "Clear",
+		name = "Clear Sky",
+		color = Color3.fromRGB(150, 210, 255),
+		description = "Normal gravity and lighting.",
+	},
+	{
+		id = "LowGravity",
+		name = "Low Gravity",
+		color = Color3.fromRGB(170, 140, 255),
+		description = "Night sky, less than half gravity. Longer jumps, slower falls.",
+	},
+	{
+		id = "Blizzard",
+		name = "Blizzard",
+		color = Color3.fromRGB(225, 240, 255),
+		description = "Thick fog. A white wind front sweeps across, then a gust shoves everyone its way.",
+	},
+	{
+		id = "Volcano",
+		name = "Volcano",
+		color = Color3.fromRGB(255, 110, 50),
+		description = "Lava rises under the arena all round. Falling into it is instant elimination.",
+	},
+} :: { Entry }
+
+Catalog.Modifiers = {
+	{
+		id = "None",
+		name = "No Modifier",
+		color = Color3.fromRGB(200, 195, 210),
+		description = "Standard rules.",
+	},
+	{
+		id = "Overdrive",
+		name = "Overdrive",
+		color = Color3.fromRGB(255, 120, 60),
+		description = "Waves come 35% faster. Survivors get +10 bonus Coins.",
+	},
+	{
+		id = "PowerSurge",
+		name = "Power Surge",
+		color = Color3.fromRGB(120, 255, 230),
+		description = "Power-ups spawn twice as often, up to 4 at once.",
+	},
+	{
+		id = "Regrowth",
+		name = "Regrowth",
+		color = Color3.fromRGB(140, 255, 120),
+		description = "Every 4s a fallen tile grows back (ghosted at first, then solid).",
+	},
+	{
+		id = "IceAge",
+		name = "Ice Age",
+		color = Color3.fromRGB(190, 240, 255),
+		description = "Every normal tile is ice. Survivors get +5 bonus Coins.",
 	},
 } :: { Entry }
 

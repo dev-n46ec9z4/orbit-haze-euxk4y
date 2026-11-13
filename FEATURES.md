@@ -35,9 +35,53 @@ Count: 14 gameplay features (5 tiles, 3 hazards, 3 power-ups, mode rotation + 2 
 
 Supporting changes (not counted): weighted random tile mix per arena (`Config.TILE_TYPE_WEIGHTS`), spawning prefers Normal tiles, `GameEvent` remote (server → client only; client messages are ignored), pure arena maths in `Shared/Grid.luau`.
 
-### Known risks to check in Studio
+### Batch 1 risks to check in Studio
 
 - **Impulses** (bounce, sweeper, meteor knockback) use a short `LinearVelocity` constraint created by the server on a client-owned character. This is a common pattern, but strength and feel are untuned.
 - **Sweeper hit window** assumes the root part sits about 3 studs above the floor (standard R15/R6 rigs). Custom rigs may need `SWEEPER_HIT_HEIGHT` adjusted.
 - **Crumble and pickup detection** run on the server at about 10 Hz, so high-latency players may see them trigger slightly late.
 - **Conveyors** rely on anchored parts with `AssemblyLinearVelocity` carrying characters.
+
+## Batch 2: maps, environments and round modifiers
+
+Each round now has a **round plan**: the mode (still rotating), plus a map, environment and modifier. The server picks these, avoiding last round's choice, and shows them in the HUD from the start of intermission. The first round after the server starts is always Classic / Square / Clear Sky / No Modifier, which is the original game. Gusts, lava and regrowth only run during Survive. In the grace countdown you get the new layout, lighting and gravity, but nothing moves you or knocks out tiles.
+
+| # | Feature | Category | Where | Verification |
+| --- | --- | --- | --- | --- |
+| 19 | **Donut** map: the centre 4x4 is a hole (84 tiles) | Map | `Grid.layoutCell` | Static; tile count + hole unit-tested |
+| 20 | **Cross** map: two 4-wide bridges, no corners (64 tiles) | Map | `Grid.layoutCell` | Static; shape unit-tested |
+| 21 | **Islands** map: nine islands split by one-tile channels (8-stud jumps, 64 tiles) | Map | `Grid.layoutCell` | Static; channel width unit-tested |
+| 22 | **Pyramid** map: each inner ring 1.5 studs higher (6-stud peak). Meteors and pickups use each tile's own height; Sweeper is blocked here | Map | `Grid.layoutCell`, `Config.Maps.Pyramid` | Static; heights unit-tested |
+| 23 | **Low Gravity** environment: 45% gravity and a night sky. Longer jumps, slower falls | Environment | `Environment.apply` | Static; settings unit-tested |
+| 24 | **Blizzard** environment: fog, plus a white wind front that sweeps across every 8s, then a horizontal gust push on every alive player | Environment | `Environment.runGust`, `Impulse.push` | Static |
+| 25 | **Volcano** environment: lava rises from Y=-20 to 6 studs under the tiles over the round, and its surface becomes the kill height | Environment | `Environment.runLava`, `GameLoop` Heartbeat | Static; lava/rescue height margins unit-tested |
+| 26 | **Overdrive** modifier: waves 35% faster, +10 bonus Coins for survivors | Modifier | `Config.Modifiers`, `GameLoop` | Static; config unit-tested |
+| 27 | **Power Surge** modifier: power-ups twice as often, up to 4 on the arena | Modifier | `PowerUps.startRound` | Static; config unit-tested |
+| 28 | **Regrowth** modifier: every 4s a fallen tile grows back into an empty slot of the current layout, away from players. It's ghosted and non-solid for 1.2s, and only turns solid once nobody is inside it | Modifier | `World.regrowTile` | Static |
+| 29 | **Ice Age** modifier: every Normal tile is Ice (regrown tiles too), +5 bonus Coins | Modifier | `World.buildArena` | Static |
+| 30 | **Round plan**: mode rotation plus a no-repeat random map, environment and modifier; an original-game first round; the plan is kept across aborted intermissions; lighting and gravity are restored after every round, including error cleanup | System | `GameLoop.getNextPlan`, `Environment.clear` | Static; no-repeat picker + first-round defaults unit-tested |
+| 31 | **Round info line** on the phase banner: map, environment, modifier | HUD | `Hud.client.luau` | Static |
+| 32 | **Round preview card** (left side) during intermission (NEXT ROUND) and grace (THIS ROUND): all four choices with descriptions; plus intro toasts for environment and modifier when Survive starts, and a bonus-Coins toast at results | HUD | `Hud.client.luau`, `GameLoop.introToast` | Static |
+| 33 | **Guide sections** for Maps, Environments and Round Modifiers | HUD | `Hud.client.luau`, `Catalog` | Static; catalog completeness unit-tested |
+
+Count for this batch: 15 features (4 maps, 3 environments, 4 modifiers, the round plan system, 3 HUD). The baseline Square / Clear Sky / No Modifier options aren't counted. Cumulative: **33** (18 + 15).
+
+How the new pieces interact with earlier features:
+- **Spawn safety:** spawns prefer Normal tiles, then calm tiles (Normal, Ice, Reinforced), then any tile. Ice Age has no Normal tiles, so players spawn on Ice or Reinforced tiles, never on bounce pads, conveyors or crumble tiles unless the map has nothing else.
+- **Wave size** scales with the map's tile count (`Grid.scaleWave`). For example, 3–5 tiles on Square becomes 2–3 on Cross and Islands, so smaller maps don't empty faster. Shrinking Ring still goes outside-in on every layout. On the Donut, the ring next to the hole is the last one left.
+- **Hazards:**
+  - Maps can block a hazard. Pyramid blocks the Sweeper, because its low beam needs a flat floor.
+  - A test checks that every mode still has at least one hazard on every map.
+  - Meteors aim at each tile's own height.
+  - Row Collapse and Meteor ignore empty layout slots and ghost tiles that are still regrowing.
+- **Rescue Wing** now triggers at whichever is higher: 10 studs below the arena, or 3 studs above the lava. A unit test checks that the highest lava level still leaves a rescue window below the tile bottoms.
+- **Regrowth** only fills slots that belong to the current layout. A tile that's still falling keeps its slot until it's destroyed. A regrowing tile can't be picked by waves, hazards, crumble or pickups until it's solid.
+
+### Batch 2 risks to check in Studio
+
+- **Gravity** (`Workspace.Gravity`) is global, so lobby players also float during Low Gravity rounds until the round ends.
+- **Lighting** is global too, so the lobby gets the round's look during the round. Both are restored in `cleanupRound`.
+- **Low Gravity jumps:** with `JumpHeight` humanoids, jump height stays the same and only airtime grows (about 1.5x horizontal distance). With `JumpPower` humanoids, jumps also get higher. I haven't checked which one the built place uses.
+- **Gusts** add to the player's current horizontal velocity for 0.4s through a planar `LinearVelocity`. The strength (28 studs/s) is untuned.
+- **Islands gaps** are 8 studs. A default running jump should clear them, but that hasn't been checked in-game.
+- **Pyramid steps** are 1.5 studs high, so players have to jump up each ring.

@@ -42,4 +42,39 @@ function Impulse.apply(character: Model?, velocity: Vector3, duration: number?):
 	return true
 end
 
+-- Adds a horizontal push on top of the character's current horizontal velocity while
+-- leaving vertical motion (gravity, jumps) alone. Used for Blizzard gusts.
+function Impulse.push(character: Model?, horizontal: Vector3, duration: number): boolean
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return false
+	end
+
+	local previous = root:FindFirstChild(MOVER_NAME)
+	if previous then
+		previous:Destroy()
+	end
+
+	local current = root.AssemblyLinearVelocity
+	local attachment = Instance.new("Attachment")
+	attachment.Name = MOVER_NAME
+
+	local mover = Instance.new("LinearVelocity")
+	mover.Attachment0 = attachment
+	mover.RelativeTo = Enum.ActuatorRelativeTo.World
+	mover.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+	mover.PrimaryTangentAxis = Vector3.xAxis
+	mover.SecondaryTangentAxis = Vector3.zAxis
+	mover.PlaneVelocity = Vector2.new(current.X + horizontal.X, current.Z + horizontal.Z)
+	mover.MaxForce = 1e5
+	mover.Parent = attachment
+
+	attachment.Parent = root
+
+	task.delay(duration, function()
+		attachment:Destroy()
+	end)
+	return true
+end
+
 return Impulse

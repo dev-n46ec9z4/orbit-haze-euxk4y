@@ -9,9 +9,13 @@
 --     that player is eliminated or the 60s timer runs out. Surviving the full minute
 --     wins the round; ending at "1 alive" would otherwise finish a solo round instantly.
 --
--- Game modes rotate through Config.MODE_ORDER (Classic -> Shrinking Ring -> Hazard
--- Storm). Each mode sets the wave pattern/size, which hazards run and how often, and
--- how often power-ups spawn. Special tiles, hazards and power-ups only act during Survive.
+-- Each round has a plan: a game mode (rotating through Config.MODE_ORDER), plus a map,
+-- environment and modifier picked at random (never the same as last round). The first
+-- round is always Classic / Square / Clear Sky / No Modifier, i.e. the original game.
+-- The mode sets the wave pattern/size, hazards and power-up rate; the map sets the
+-- layout (and can block hazards); the environment sets lighting/gravity plus gusts or
+-- lava; the modifier tweaks wave speed, power-ups, regrowth, ice or bonus coins.
+-- Special tiles, hazards, power-ups, gusts, lava and regrowth only act during Survive.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -25,6 +29,7 @@ local Format = require(Shared:WaitForChild("Format"))
 local Grid = require(Shared:WaitForChild("Grid"))
 local Net = require(Shared:WaitForChild("Net"))
 
+local Environment = require(script.Parent:WaitForChild("Environment"))
 local Hazards = require(script.Parent:WaitForChild("Hazards"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local PowerUps = require(script.Parent:WaitForChild("PowerUps"))
@@ -54,6 +59,9 @@ local state = {
 	total = 0,
 	winners = {} :: { string },
 	mode = Config.MODE_ORDER[1],
+	map = Config.MAP_ORDER[1],
+	environment = Config.ENVIRONMENT_ORDER[1],
+	modifier = Config.MODIFIER_ORDER[1],
 }
 
 local roundActive = false -- true during Grace and Survive
@@ -70,6 +78,9 @@ local function snapshot()
 		players = #Players:GetPlayers(),
 		winners = state.winners,
 		mode = state.mode,
+		map = state.map,
+		environment = state.environment,
+		modifier = state.modifier,
 	}
 end
 
@@ -207,18 +218,19 @@ Players.PlayerRemoving:Connect(function(player)
 	lastRequest[player] = nil
 end)
 
--- Rescue Wings fire first (they trigger well above the kill plane); then anything
--- below KILL_PLANE_Y dies and is eliminated.
+-- Rescue Wings fire first (they always trigger above the kill height); then anything
+-- below the kill height (KILL_PLANE_Y, or the Volcano lava surface) is eliminated.
 RunService.Heartbeat:Connect(function()
+	local killY = Environment.getKillY()
 	if roundActive then
 		for _, player in ipairs(getAliveParticipants()) do
-			PowerUps.tryRescue(player)
+			PowerUps.tryRescue(player, killY)
 		end
 	end
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if root and root:IsA("BasePart") and root.Position.Y < Config.KILL_PLANE_Y then
+		if root and root:IsA("BasePart") and root.Position.Y < killY then
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
 			if humanoid and humanoid.Health > 0 then
 				humanoid.Health = 0
@@ -273,16 +285,46 @@ local function waitForPlayers()
 	end
 end
 
--- Returns false if the player count dropped below the minimum mid-countdown.
-local modeIndex = 0
+type RoundPlan = { modeIndex: number, mode: string, map: string, environment: string, modifier: string }
 
--- Index into Config.MODE_ORDER of the mode the next round will use. Only advances
--- once a round actually starts, so an aborted intermission doesn't skip a mode.
-local function peekNextMode(): number
-	return (modeIndex % #Config.MODE_ORDER) + 1
+local lastPlan: RoundPlan? = nil
+local pendingPlan: RoundPlan? = nil
+
+-- The plan for the next round. It stays the same across aborted intermissions and is
+-- only committed (becoming lastPlan) once a round actually starts.
+local function getNextPlan(): RoundPlan
+	if pendingPlan then
+		return pendingPlan
+	end
+	local plan: RoundPlan
+	if not lastPlan then
+		plan = {
+			modeIndex = 1,
+			mode = Config.MODE_ORDER[1],
+			map = Config.MAP_ORDER[1],
+			environment = Config.ENVIRONMENT_ORDER[1],
+			modifier = Config.MODIFIER_ORDER[1],
+		}
+	else
+		local modeIndex = (lastPlan.modeIndex % #Config.MODE_ORDER) + 1
+		plan = {
+			modeIndex = modeIndex,
+			mode = Config.MODE_ORDER[modeIndex],
+			map = Grid.pickDifferent(Config.MAP_ORDER, lastPlan.map, math.random),
+			environment = Grid.pickDifferent(Config.ENVIRONMENT_ORDER, lastPlan.environment, math.random),
+			modifier = Grid.pickDifferent(Config.MODIFIER_ORDER, lastPlan.modifier, math.random),
+		}
+	end
+	pendingPlan = plan
+	return plan
 end
 
-local function runIntermission(nextMode: string): boolean
+local function planState(plan: RoundPlan)
+	return { mode = plan.mode, map = plan.map, environment = plan.environment, modifier = plan.modifier }
+end
+
+-- Returns false if the player count dropped below the minimum mid-countdown.
+local function runIntermission(plan: RoundPlan): boolean
 	for remaining = Config.INTERMISSION_TIME, 1, -1 do
 		if not hasEnoughPlayers() then
 			return false
@@ -294,7 +336,10 @@ local function runIntermission(nextMode: string): boolean
 			alive = 0,
 			total = 0,
 			winners = {},
-			mode = nextMode,
+			mode = plan.mode,
+			map = plan.map,
+			environment = plan.environment,
+			modifier = plan.modifier,
 		})
 		task.wait(1)
 	end
@@ -305,6 +350,7 @@ local function cleanupRound()
 	roundActive = false
 	PowerUps.endRound()
 	TileEffects.reset()
+	Environment.clear()
 	for player in pairs(participants) do
 		setAlive(player, false)
 	end
@@ -313,11 +359,31 @@ local function cleanupRound()
 	currentArena = nil
 end
 
-local function runRound(modeId: string)
-	local mode = Config.Modes[modeId] or Config.Modes.Classic
-	local modeInfo = Catalog.find(Catalog.Modes, modeId)
-	currentArena = World.buildArena()
+local function introToast(list: { Catalog.Entry }, id: string, skipId: string?)
+	local info = Catalog.find(list, id)
+	if info and id ~= skipId then
+		toast(string.upper(info.name) .. ": " .. info.description, info.color, 4)
+	end
+end
+
+local function runRound(plan: RoundPlan)
+	local mode = Config.Modes[plan.mode] or Config.Modes.Classic
+	local map = Config.Maps[plan.map] or Config.Maps.Square
+	local modifier = Config.Modifiers[plan.modifier] or Config.Modifiers.None
+	setState(planState(plan))
+
+	currentArena = World.buildArena({ layout = plan.map, allIce = modifier.allIce })
 	local arena = currentArena :: Model
+	Environment.apply(plan.environment, arena)
+
+	-- Hazards the map can't support (e.g. the sweeper on the Pyramid) are skipped.
+	local hazards = {}
+	for _, hazard in ipairs(mode.hazards) do
+		if not table.find(map.blockedHazards, hazard) then
+			table.insert(hazards, hazard)
+		end
+	end
+	local mapTiles = tonumber(arena:GetAttribute("TileCount")) or Config.GRID_SIZE ^ 2
 
 	local players = getEligiblePlayers()
 	if #players == 0 then
@@ -367,15 +433,18 @@ local function runRound(modeId: string)
 		end,
 	}
 	World.activateTiles(arena)
-	PowerUps.startRound(arena)
-	if modeInfo then
-		toast(string.upper(modeInfo.name) .. ": " .. modeInfo.description, modeInfo.color, 4)
-	end
+	PowerUps.startRound(arena, modifier.maxPowerUps)
+	Environment.startSurvive(hazardContext)
+	introToast(Catalog.Modes, plan.mode)
+	introToast(Catalog.Environments, plan.environment, "Clear")
+	introToast(Catalog.Modifiers, plan.modifier, "None")
 
+	local powerUpInterval = mode.powerUpInterval * modifier.powerUpIntervalScale
 	local startTime = os.clock()
 	local nextWaveAt = startTime
 	local nextHazardAt = startTime + mode.firstHazardAt
-	local nextPowerUpAt = startTime + mode.powerUpInterval / 2
+	local nextPowerUpAt = startTime + powerUpInterval / 2
+	local nextRegrowAt = startTime + modifier.regrowInterval
 	local lastShown = -1
 	while not shouldEndRound(total) do
 		local now = os.clock()
@@ -385,19 +454,26 @@ local function runRound(modeId: string)
 		end
 
 		if now >= nextWaveAt then
-			World.dropWave(arena, math.random(mode.waveMin, mode.waveMax), mode.pattern)
-			nextWaveAt = now
-				+ Grid.waveInterval(elapsed, Config.ROUND_TIME, Config.WAVE_INTERVAL_START, Config.WAVE_INTERVAL_END)
+			local count = Grid.scaleWave(math.random(mode.waveMin, mode.waveMax), mapTiles, Config.GRID_SIZE ^ 2)
+			World.dropWave(arena, count, mode.pattern)
+			local interval =
+				Grid.waveInterval(elapsed, Config.ROUND_TIME, Config.WAVE_INTERVAL_START, Config.WAVE_INTERVAL_END)
+			nextWaveAt = now + interval * modifier.waveIntervalScale
 		end
 
-		if now >= nextHazardAt and #mode.hazards > 0 then
-			Hazards.start(mode.hazards[math.random(#mode.hazards)], hazardContext)
+		if now >= nextHazardAt and #hazards > 0 then
+			Hazards.start(hazards[math.random(#hazards)], hazardContext)
 			nextHazardAt = now + mode.hazardInterval
 		end
 
 		if now >= nextPowerUpAt then
 			PowerUps.spawnPickup()
-			nextPowerUpAt = now + mode.powerUpInterval
+			nextPowerUpAt = now + powerUpInterval
+		end
+
+		if modifier.regrowInterval > 0 and now >= nextRegrowAt then
+			World.regrowTile(arena, getAliveParticipants)
+			nextRegrowAt = now + modifier.regrowInterval
 		end
 
 		local alivePlayers = getAliveParticipants()
@@ -430,7 +506,7 @@ local function runRound(modeId: string)
 
 	local winnerNames = {}
 	for _, player in ipairs(winners) do
-		PlayerData.award(player, Config.WIN_REWARD, Config.COIN_REWARD)
+		PlayerData.award(player, Config.WIN_REWARD, Config.COIN_REWARD + modifier.bonusCoins)
 		table.insert(winnerNames, player.DisplayName)
 	end
 
@@ -451,6 +527,13 @@ local function runRound(modeId: string)
 		end
 	end
 	cleanupRound()
+	if #winners > 0 and modifier.bonusCoins > 0 then
+		local info = Catalog.find(Catalog.Modifiers, plan.modifier)
+		toast(
+			string.format("+%d bonus Coins for surviving %s", modifier.bonusCoins, if info then info.name else plan.modifier),
+			info and info.color
+		)
+	end
 
 	for remaining = Config.RESULTS_TIME, 1, -1 do
 		setState({
@@ -470,11 +553,11 @@ end
 task.spawn(function()
 	while true do
 		waitForPlayers()
-		local nextIndex = peekNextMode()
-		local modeId = Config.MODE_ORDER[nextIndex]
-		if runIntermission(modeId) then
-			modeIndex = nextIndex
-			local ok, err = pcall(runRound, modeId)
+		local plan = getNextPlan()
+		if runIntermission(plan) then
+			lastPlan = plan
+			pendingPlan = nil
+			local ok, err = pcall(runRound, plan)
 			if not ok then
 				warn("[GameLoop] Round error:", err)
 				cleanupRound()

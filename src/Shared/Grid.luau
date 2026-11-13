@@ -91,4 +91,49 @@ function Grid.beamDistance(
 	return distance, ox / distance, oz / distance
 end
 
+-- Arena layouts. Returns whether cell (x, z) of a size x size grid holds a tile, and
+-- how many studs that tile is raised. `step` is the per-ring rise for "Pyramid".
+function Grid.layoutCell(layout: string, x: number, z: number, size: number, step: number): (boolean, number)
+	local ring = Grid.ringIndex(x, z, size)
+	if layout == "Donut" then
+		-- Centre 4x4 (for size 10) is open: rings 0-2 stay.
+		return ring < math.floor(size / 2) - 2, 0
+	elseif layout == "Cross" then
+		-- Two 4-wide arms through the middle.
+		local lo = math.floor((size - 4) / 2)
+		local hi = lo + 3
+		return (x >= lo and x <= hi) or (z >= lo and z <= hi), 0
+	elseif layout == "Islands" then
+		-- Single-cell channels split the grid into 9 islands; gaps are one tile wide
+		-- (8 studs edge to edge), which is a normal running jump.
+		local function channel(i: number): boolean
+			return i == 3 or i == size - 4
+		end
+		return not (channel(x) or channel(z)), 0
+	elseif layout == "Pyramid" then
+		return true, ring * step
+	end
+	return true, 0 -- "Square"
+end
+
+-- Scales a wave's tile count by how big the map is compared with the full square, so
+-- smaller layouts don't empty faster. Never returns less than 1.
+function Grid.scaleWave(count: number, mapTiles: number, fullTiles: number): number
+	return math.max(1, math.floor(count * mapTiles / fullTiles + 0.5))
+end
+
+-- Random element of `list` that differs from `last` when possible.
+function Grid.pickDifferent<T>(list: { T }, last: T?, random: RandomInt): T
+	local candidates = {}
+	for _, item in ipairs(list) do
+		if item ~= last then
+			table.insert(candidates, item)
+		end
+	end
+	if #candidates == 0 then
+		return list[1]
+	end
+	return candidates[random(#candidates)]
+end
+
 return Grid

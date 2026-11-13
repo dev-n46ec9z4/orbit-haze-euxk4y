@@ -17,7 +17,7 @@ node tests/run.mjs                    # standalone Luau tests (needs `luau` on P
 | Instance | Source |
 | --- | --- |
 | `ReplicatedStorage.Shared` | `src/Shared` (Config, Catalog, Grid, Net, Format) |
-| `ServerScriptService.Server` | `src/Server` (GameLoop, World, TileEffects, Hazards, PowerUps, Impulse, PlayerData) |
+| `ServerScriptService.Server` | `src/Server` (GameLoop, World, Environment, TileEffects, Hazards, PowerUps, Impulse, PlayerData) |
 | `StarterPlayer.StarterPlayerScripts.Client` | `src/Client` (Hud) |
 
 ## Round flow
@@ -28,11 +28,13 @@ node tests/run.mjs                    # standalone Luau tests (needs `luau` on P
 4. **Survive** — every wave drops 3–5 random intact tiles; the wave interval eases from 1.2s to 0.5s across the 60s round. Tiles flash red for 0.6s, unanchor, and are destroyed 2s later (`SURVIVE!`).
 5. **Results** — survivors get +1 Win and +25 Coins, the winner is announced (`WINNER: <Name>`), survivors return to the lobby, the arena is destroyed and the loop repeats.
 
-Falling below Y = -20 (the kill plane), dying, resetting, or leaving eliminates a player. Eliminated players respawn in the lobby after 3s. Late joiners spawn in the lobby and their HUD requests the current state on load.
+Falling below Y = -20 (the kill plane, or the lava surface in Volcano rounds), dying, resetting, or leaving eliminates a player. Eliminated players respawn in the lobby after 3s. Late joiners spawn in the lobby and their HUD requests the current state on load.
 
 ## Modes, tiles, hazards and power-ups
 
 Modes rotate each round: **Classic** (random waves, occasional hazards), **Shrinking Ring** (tiles fall from the edge inward) and **Hazard Storm** (smaller waves, a hazard every 6s). Each arena mixes in special tiles: Ice, Crumble, Reinforced, Bounce Pad and Conveyor. The hazards are Meteor, Sweeper and Row Collapse. Glowing orbs give Speed Boost, Super Jump or Rescue Wing. All of these are active only during Survive.
+
+Each round also has a random **map** (Square, Donut, Cross, Islands, Pyramid), **environment** (Clear Sky; Low Gravity; Blizzard with wind gusts; Volcano with rising lava) and **modifier** (none, Overdrive, Power Surge, Regrowth, Ice Age). None of the three repeats from the previous round. The first round after a server starts is always Classic on Square with Clear Sky and no modifier. The HUD shows the plan on the banner and on a preview card during intermission and grace.
 
 In game, press **G** or click **GUIDE** for descriptions of everything. Names and descriptions live in `src/Shared/Catalog.luau`, and tuning lives in `src/Shared/Config.luau`. See [FEATURES.md](FEATURES.md) for the numbered checklist and how each feature was verified.
 

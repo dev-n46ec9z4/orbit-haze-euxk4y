@@ -219,46 +219,75 @@ local function styleTile(tile: BasePart, tileType: string, checkerColor: Color3)
 	end
 end
 
-function World.buildArena(): Model
+export type ArenaOptions = {
+	layout: string?, -- Config.MAP_ORDER id; defaults to "Square"
+	allIce: boolean?, -- Ice Age modifier: every Normal tile becomes Ice
+}
+
+local function slotPosition(x: number, z: number, height: number): Vector3
+	local pitch = Config.TILE_SIZE.X + Config.TILE_GAP
+	local centerOffset = (Config.GRID_SIZE - 1) / 2
+	local center = Config.ARENA_CENTER
+	return Vector3.new(
+		center.X + (x - centerOffset) * pitch,
+		center.Y + height,
+		center.Z + (z - centerOffset) * pitch
+	)
+end
+
+-- Whether a grid slot belongs to the layout, and its height offset.
+local function layoutSlot(layout: string, x: number, z: number): (boolean, number)
+	return Grid.layoutCell(layout, x, z, Config.GRID_SIZE, Config.PYRAMID_STEP)
+end
+
+local function makeTile(x: number, z: number, height: number, tileType: string): Part
+	local checker = if (x + z) % 2 == 0 then Colors.TileA else Colors.TileB
+	local tile = makePart({
+		Name = string.format("Tile_%d_%d", x, z),
+		Size = Config.TILE_SIZE,
+		CFrame = CFrame.new(slotPosition(x, z, height)),
+		Material = Enum.Material.SmoothPlastic,
+		Color = checker,
+	})
+	tile:SetAttribute("State", TILE_INTACT)
+	tile:SetAttribute("GridX", x)
+	tile:SetAttribute("GridZ", z)
+	styleTile(tile, tileType, checker)
+	return tile
+end
+
+function World.buildArena(options: ArenaOptions?): Model
 	local existing = Workspace:FindFirstChild("Arena")
 	if existing then
 		existing:Destroy()
 	end
+	local layout = (options and options.layout) or "Square"
+	local allIce = (options and options.allIce) == true
 
 	local model = Instance.new("Model")
 	model.Name = "Arena"
+	model:SetAttribute("Layout", layout)
+	model:SetAttribute("AllIce", allIce)
 
 	local tiles = Instance.new("Folder")
 	tiles.Name = "Tiles"
 	tiles.Parent = model
 
-	local grid = Config.GRID_SIZE
-	local tileSize = Config.TILE_SIZE
-	local pitch = tileSize.X + Config.TILE_GAP
-	local centerOffset = (grid - 1) / 2
-	local center = Config.ARENA_CENTER
-
-	for x = 0, grid - 1 do
-		for z = 0, grid - 1 do
-			local checker = if (x + z) % 2 == 0 then Colors.TileA else Colors.TileB
-			local tile = makePart({
-				Name = string.format("Tile_%d_%d", x, z),
-				Size = tileSize,
-				CFrame = CFrame.new(
-					center.X + (x - centerOffset) * pitch,
-					center.Y,
-					center.Z + (z - centerOffset) * pitch
-				),
-				Material = Enum.Material.SmoothPlastic,
-				Color = checker,
-			})
-			tile:SetAttribute("State", TILE_INTACT)
-			tile:SetAttribute("GridX", x)
-			tile:SetAttribute("GridZ", z)
-			styleTile(tile, Grid.weightedPick(Config.TILE_TYPE_WEIGHTS, math.random()), checker)
-			tile.Parent = tiles
+	local count = 0
+	for x = 0, Config.GRID_SIZE - 1 do
+		for z = 0, Config.GRID_SIZE - 1 do
+			local included, height = layoutSlot(layout, x, z)
+			if included then
+				local tileType = Grid.weightedPick(Config.TILE_TYPE_WEIGHTS, math.random())
+				if allIce and tileType == "Normal" then
+					tileType = "Ice"
+				end
+				makeTile(x, z, height, tileType).Parent = tiles
+				count += 1
+			end
 		end
 	end
+	model:SetAttribute("TileCount", count)
 
 	model.Parent = Workspace
 	return model
@@ -295,13 +324,22 @@ function World.countIntactTiles(arena: Model?): number
 	return #getIntactTiles(arena)
 end
 
--- Y of the tile tops (arena surface).
+-- Y of the base tile tops (flat maps, and the lowest ring of the Pyramid).
 function World.getSurfaceY(): number
 	return Config.ARENA_CENTER.Y + Config.TILE_SIZE.Y / 2
 end
 
+-- Y of one tile's top face (raised tiles on the Pyramid map differ from getSurfaceY).
+function World.getTileTop(tile: BasePart): number
+	return tile.Position.Y + tile.Size.Y / 2
+end
+
+-- Tiles that are safe to stand still on (no launch, push or crumble).
+local CALM_TILES = { Normal = true, Ice = true, Reinforced = true }
+
 -- Returns `count` spawn CFrames above random distinct intact tiles (cycling if needed).
--- Normal tiles are preferred so nobody starts on ice, a bounce pad or a crumble tile.
+-- Prefers Normal tiles, then any calm tile (Ice Age has no Normal tiles), then anything,
+-- so nobody starts on a bounce pad, conveyor or crumble tile if it can be avoided.
 function World.getSpawnCFrames(arena: Model, count: number): { CFrame }
 	local all = getIntactTiles(arena)
 	local result = {}
@@ -312,13 +350,17 @@ function World.getSpawnCFrames(arena: Model, count: number): { CFrame }
 		return result
 	end
 
-	local normal = {}
+	local normal, calm = {}, {}
 	for _, tile in ipairs(all) do
-		if tile:GetAttribute("TileType") == "Normal" then
+		local tileType = tile:GetAttribute("TileType")
+		if tileType == "Normal" then
 			table.insert(normal, tile)
 		end
+		if CALM_TILES[tileType] then
+			table.insert(calm, tile)
+		end
 	end
-	local tiles = if #normal >= count then normal else all
+	local tiles = if #normal >= count then normal elseif #calm >= count then calm else all
 	Grid.shuffle(tiles, math.random)
 
 	local lift = Config.TILE_SIZE.Y / 2 + 3
@@ -431,6 +473,94 @@ function World.getLine(arena: Model, axis: string, index: number): { BasePart }
 		end
 	end
 	return result
+end
+
+-- Regrowth modifier: grows one Normal (or Ice, in Ice Age) tile back into a random empty
+-- layout slot that no alive player is near. The tile is ghosted and non-solid for
+-- REGROW_TIME first, so it can't trap or launch anyone. Returns true if a tile grew.
+local function rootPositions(players: { Player }): { Vector3 }
+	local result = {}
+	for _, player in ipairs(players) do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			table.insert(result, root.Position)
+		end
+	end
+	return result
+end
+
+local function slotIsClear(position: Vector3, roots: { Vector3 }): boolean
+	for _, rootPosition in ipairs(roots) do
+		local flat = (rootPosition - position) * Vector3.new(1, 0, 1)
+		if flat.Magnitude < Config.REGROW_CLEARANCE + Config.TILE_SIZE.X / 2 then
+			return false
+		end
+	end
+	return true
+end
+
+function World.regrowTile(arena: Model?, getPlayers: () -> { Player }): boolean
+	local tiles = World.getTilesFolder(arena)
+	if not arena or not tiles then
+		return false
+	end
+	local layout = arena:GetAttribute("Layout")
+	local layoutId = if type(layout) == "string" then layout else "Square"
+
+	local occupied: { [number]: boolean } = {}
+	for _, tile in ipairs(tiles:GetChildren()) do
+		local x, z = tonumber(tile:GetAttribute("GridX")), tonumber(tile:GetAttribute("GridZ"))
+		if x and z then
+			occupied[x * Config.GRID_SIZE + z] = true
+		end
+	end
+
+	local roots = rootPositions(getPlayers())
+	local candidates = {}
+	for x = 0, Config.GRID_SIZE - 1 do
+		for z = 0, Config.GRID_SIZE - 1 do
+			local included, height = layoutSlot(layoutId, x, z)
+			if included and not occupied[x * Config.GRID_SIZE + z] then
+				if slotIsClear(slotPosition(x, z, height), roots) then
+					table.insert(candidates, { x = x, z = z, height = height })
+				end
+			end
+		end
+	end
+	if #candidates == 0 then
+		return false
+	end
+
+	local slot = candidates[math.random(#candidates)]
+	local tileType = if arena:GetAttribute("AllIce") then "Ice" else "Normal"
+	local tile = makeTile(slot.x, slot.z, slot.height, tileType)
+	local finalTransparency = tile.Transparency
+	tile:SetAttribute("State", "Growing")
+	tile.CanCollide = false
+	tile.Transparency = 0.7
+	tile.Parent = tiles
+
+	task.spawn(function()
+		task.wait(Config.REGROW_TIME)
+		-- Only solidify once nobody has wandered into the slot; give up after ~5s.
+		for _ = 1, 16 do
+			if not tile.Parent or tile:GetAttribute("State") ~= "Growing" then
+				return
+			end
+			if slotIsClear(tile.Position, rootPositions(getPlayers())) then
+				tile.Transparency = finalTransparency
+				tile.CanCollide = true
+				tile:SetAttribute("State", TILE_INTACT)
+				return
+			end
+			task.wait(0.3)
+		end
+		if tile.Parent then
+			tile:Destroy()
+		end
+	end)
+	return true
 end
 
 function World.destroyArena(arena: Model?)

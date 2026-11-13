@@ -110,6 +110,119 @@ Config.COIN_REWARD = 25
 Config.ALIVE_TAG = "Alive"
 Config.DATASTORE_NAME = "FallingTilesStats_v1"
 
+-- Maps (arena layouts). Shapes are defined in Grid.layoutCell; text in Catalog.Maps.
+-- blockedHazards: hazards that don't work on the layout (the sweeper needs a flat floor).
+Config.PYRAMID_STEP = 1.5 -- studs each inner ring is raised on the Pyramid map
+Config.MAP_ORDER = { "Square", "Donut", "Cross", "Islands", "Pyramid" }
+Config.Maps = {
+	Square = { blockedHazards = {} },
+	Donut = { blockedHazards = {} },
+	Cross = { blockedHazards = {} },
+	Islands = { blockedHazards = {} },
+	Pyramid = { blockedHazards = { "Sweeper" } },
+}
+
+-- Environments. Lighting values are only applied while a round is running and are
+-- restored afterwards. nil lighting fields keep the place defaults.
+Config.ENVIRONMENT_ORDER = { "Clear", "LowGravity", "Blizzard", "Volcano" }
+Config.Environments = {
+	Clear = {
+		gravityScale = 1,
+		gustInterval = 0,
+		lava = false,
+		lighting = {},
+	},
+	LowGravity = {
+		gravityScale = 0.45,
+		gustInterval = 0,
+		lava = false,
+		lighting = {
+			ClockTime = 0,
+			Brightness = 1,
+			Ambient = Color3.fromRGB(90, 70, 140),
+			OutdoorAmbient = Color3.fromRGB(110, 90, 170),
+		},
+	},
+	Blizzard = {
+		gravityScale = 1,
+		gustInterval = 8,
+		lava = false,
+		lighting = {
+			ClockTime = 9,
+			Brightness = 1.5,
+			FogColor = Color3.fromRGB(225, 235, 245),
+			FogStart = 20,
+			FogEnd = 150,
+		},
+	},
+	Volcano = {
+		gravityScale = 1,
+		gustInterval = 0,
+		lava = true,
+		lighting = {
+			ClockTime = 18.3,
+			Brightness = 1.2,
+			Ambient = Color3.fromRGB(120, 50, 30),
+			OutdoorAmbient = Color3.fromRGB(150, 70, 40),
+			FogColor = Color3.fromRGB(90, 30, 20),
+			FogStart = 60,
+			FogEnd = 400,
+		},
+	},
+}
+Config.DEFAULT_GRAVITY = 196.2
+Config.GUST_WARN_TIME = 1.5
+Config.GUST_SPEED = 28 -- horizontal studs/s added during a gust
+Config.GUST_DURATION = 0.4
+Config.LAVA_MAX_BELOW_SURFACE = 6 -- lava stops rising this far below the base tile tops
+
+-- Round modifiers: one per round (None included). Text in Catalog.Modifiers.
+Config.MODIFIER_ORDER = { "None", "Overdrive", "PowerSurge", "Regrowth", "IceAge" }
+Config.Modifiers = {
+	None = {
+		waveIntervalScale = 1,
+		powerUpIntervalScale = 1,
+		maxPowerUps = 2,
+		regrowInterval = 0,
+		allIce = false,
+		bonusCoins = 0,
+	},
+	Overdrive = {
+		waveIntervalScale = 0.65,
+		powerUpIntervalScale = 1,
+		maxPowerUps = 2,
+		regrowInterval = 0,
+		allIce = false,
+		bonusCoins = 10,
+	},
+	PowerSurge = {
+		waveIntervalScale = 1,
+		powerUpIntervalScale = 0.5,
+		maxPowerUps = 4,
+		regrowInterval = 0,
+		allIce = false,
+		bonusCoins = 0,
+	},
+	Regrowth = {
+		waveIntervalScale = 1,
+		powerUpIntervalScale = 1,
+		maxPowerUps = 2,
+		regrowInterval = 4,
+		allIce = false,
+		bonusCoins = 0,
+	},
+	IceAge = {
+		waveIntervalScale = 1,
+		powerUpIntervalScale = 1,
+		maxPowerUps = 2,
+		regrowInterval = 0,
+		allIce = true,
+		bonusCoins = 5,
+	},
+}
+Config.REGROW_TIME = 1.2 -- seconds a regrowing tile stays ghosted before it becomes solid
+Config.REGROW_CLEARANCE = 5 -- studs (XZ) a regrowing slot must be from any player
+
 Config.Phases = {
 	Waiting = "Waiting",
 	Intermission = "Intermission",

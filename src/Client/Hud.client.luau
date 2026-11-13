@@ -123,12 +123,21 @@ local modeLabel = label({
 	Position = UDim2.fromOffset(12, 84),
 })
 
+-- Map / environment / modifier for the current or next round.
+local roundInfoLabel = label({
+	Name = "RoundInfo",
+	Text = "",
+	TextColor3 = Color3.fromRGB(200, 195, 210),
+	Size = UDim2.new(1, -24, 0, 16),
+	Position = UDim2.fromOffset(12, 106),
+})
+
 local bannerHome = UDim2.new(0.5, 0, 0, 10)
 local banner = create("Frame", {
 	Name = "PhaseBanner",
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = bannerHome,
-	Size = UDim2.fromOffset(420, 110),
+	Size = UDim2.fromOffset(440, 130),
 	BackgroundColor3 = PANEL_COLOR,
 	BackgroundTransparency = 0.2,
 	Parent = screenGui,
@@ -140,6 +149,7 @@ local banner = create("Frame", {
 	timerLabel,
 	aliveLabel,
 	modeLabel,
+	roundInfoLabel,
 }) :: Frame
 
 -- Top-right stats card
@@ -188,7 +198,7 @@ create("Frame", {
 local toastStack = create("Frame", {
 	Name = "Toasts",
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 130),
+	Position = UDim2.new(0.5, 0, 0, 150),
 	Size = UDim2.fromOffset(480, 160),
 	BackgroundTransparency = 1,
 	Parent = screenGui,
@@ -212,6 +222,80 @@ local powerUpTray = create("Frame", {
 }, {
 	create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }),
 }) :: Frame
+
+-- Round preview card (left side): mode, map, environment and modifier with
+-- descriptions. Shown during intermission and the grace countdown, hidden in play.
+local previewRows: { [string]: { name: TextLabel, description: TextLabel } } = {}
+local previewList = create("Frame", {
+	Name = "Rows",
+	Position = UDim2.fromOffset(12, 40),
+	Size = UDim2.new(1, -24, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+}, {
+	create("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+}) :: Frame
+
+for index, kind in ipairs({ "Mode", "Map", "Environment", "Modifier" }) do
+	local nameLabel = label({
+		Name = "Name",
+		Text = string.upper(kind) .. ": -",
+		Font = FONT_BOLD,
+		TextScaled = false,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0, 18),
+	})
+	local descriptionLabel = label({
+		Name = "Description",
+		Text = "",
+		TextScaled = false,
+		TextSize = 13,
+		TextWrapped = true,
+		TextColor3 = Color3.fromRGB(210, 205, 220),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Position = UDim2.fromOffset(0, 20),
+	})
+	create("Frame", {
+		Name = kind,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		LayoutOrder = index,
+		Parent = previewList,
+	}, { nameLabel, descriptionLabel })
+	previewRows[kind] = { name = nameLabel, description = descriptionLabel }
+end
+
+local previewCard = create("Frame", {
+	Name = "RoundPreview",
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 12, 0.5, 0),
+	Size = UDim2.fromOffset(270, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundColor3 = PANEL_COLOR,
+	BackgroundTransparency = 0.15,
+	Visible = false,
+	Parent = screenGui,
+}, {
+	create("UICorner", { CornerRadius = UDim.new(0, 12) }),
+	create("UIStroke", { Thickness = 2, Color = Config.Colors.WarmNeon, Transparency = 0.3 }),
+	create("UIPadding", { PaddingBottom = UDim.new(0, 12) }),
+	label({
+		Name = "Title",
+		Text = "NEXT ROUND",
+		Font = FONT_BOLD,
+		TextColor3 = Config.Colors.WarmNeon,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, -24, 0, 22),
+		Position = UDim2.fromOffset(12, 10),
+	}),
+	previewList,
+}) :: Frame
+local previewTitle = previewCard:FindFirstChild("Title") :: TextLabel
 
 -- Guide panel ------------------------------------------------------------------
 
@@ -369,6 +453,9 @@ do
 		{ "GAME MODES (one per round, in rotation)", Catalog.Modes },
 		{ "TILES", Catalog.TileTypes },
 		{ "HAZARDS", Catalog.Hazards },
+		{ "MAPS (random each round)", Catalog.Maps },
+		{ "ENVIRONMENTS (random each round)", Catalog.Environments },
+		{ "ROUND MODIFIERS (one per round)", Catalog.Modifiers },
 		{ "POWER-UPS (touch the glowing orbs)", Catalog.PowerUps },
 	}) do
 		addHeading(section[1] :: string)
@@ -620,6 +707,39 @@ local function applyState(data: any)
 		local prefix = if phase == Phases.Intermission then "NEXT MODE: " else "MODE: "
 		modeLabel.Text = prefix .. string.upper(modeInfo.name) .. "  |  G FOR GUIDE"
 		modeLabel.TextColor3 = modeInfo.color
+	end
+
+	-- Round plan: compact line on the banner, full preview card before play starts.
+	local plan = {
+		Mode = Catalog.find(Catalog.Modes, data.mode),
+		Map = Catalog.find(Catalog.Maps, data.map),
+		Environment = Catalog.find(Catalog.Environments, data.environment),
+		Modifier = Catalog.find(Catalog.Modifiers, data.modifier),
+	}
+	if phase == Phases.Waiting or not plan.Map or not plan.Environment or not plan.Modifier then
+		roundInfoLabel.Text = ""
+	else
+		roundInfoLabel.Text = string.format(
+			"MAP: %s  |  %s  |  %s",
+			string.upper(plan.Map.name),
+			string.upper(plan.Environment.name),
+			string.upper(plan.Modifier.name)
+		)
+	end
+	for kind, row in pairs(previewRows) do
+		local info = (plan :: any)[kind]
+		row.name.Text = string.upper(kind) .. ": " .. (if info then string.upper(info.name) else "-")
+		row.name.TextColor3 = if info then info.color else TEXT_COLOR
+		row.description.Text = if info then info.description else ""
+	end
+	local showPreview = phase == Phases.Intermission or phase == Phases.Grace
+	previewTitle.Text = if phase == Phases.Grace then "THIS ROUND" else "NEXT ROUND"
+	if showPreview and not previewCard.Visible then
+		previewCard.Visible = true
+		previewCard.Position = UDim2.new(0, -280, 0.5, 0)
+		TweenService:Create(previewCard, SMOOTH, { Position = UDim2.new(0, 12, 0.5, 0) }):Play()
+	elseif not showPreview then
+		previewCard.Visible = false
 	end
 
 	if phase ~= currentPhase then

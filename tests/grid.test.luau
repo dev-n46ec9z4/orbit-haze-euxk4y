@@ -62,6 +62,67 @@ Grid.shuffle(list, math.random)
 table.sort(list)
 check("shuffle keeps elements", table.concat(list, ",") == "1,2,3,4,5,6")
 
+-- Layouts ---------------------------------------------------------------------
+local function layoutStats(layout: string)
+	local count, maxHeight = 0, 0
+	local cellsOn = {}
+	for x = 0, 9 do
+		cellsOn[x] = {}
+		for z = 0, 9 do
+			local on, height = Grid.layoutCell(layout, x, z, 10, 1.5)
+			cellsOn[x][z] = on
+			if on then
+				count += 1
+				maxHeight = math.max(maxHeight, height)
+			end
+		end
+	end
+	return count, maxHeight, cellsOn
+end
+
+local squareCount = layoutStats("Square")
+check("square has 100 tiles", squareCount == 100)
+local donutCount, _, donut = layoutStats("Donut")
+check("donut has 84 tiles", donutCount == 84)
+check("donut centre open", not donut[4][4] and not donut[3][6] and donut[2][2] and donut[0][9])
+local crossCount, _, cross = layoutStats("Cross")
+check("cross has 64 tiles", crossCount == 64)
+check("cross corners open", not cross[0][0] and not cross[9][9] and cross[3][0] and cross[0][6])
+local islandCount, _, islands = layoutStats("Islands")
+check("islands has 64 tiles", islandCount == 64)
+check("islands channels open", not islands[3][0] and not islands[6][5] and islands[2][2] and islands[4][4])
+-- Every channel is exactly one cell wide, so neighbouring islands are one jump apart.
+for i = 0, 9 do
+	local channel = not islands[i][0]
+	if channel then
+		check("islands channel width at " .. i, islands[i - 1][0] and islands[i + 1][0])
+	end
+end
+local pyramidCount, pyramidPeak = layoutStats("Pyramid")
+check("pyramid full with 6 stud peak", pyramidCount == 100 and math.abs(pyramidPeak - 6) < 1e-9)
+local _, edgeHeight = Grid.layoutCell("Pyramid", 0, 5, 10, 1.5)
+check("pyramid edge at base", edgeHeight == 0)
+check("unknown layout falls back to square", layoutStats("Nope") == 100)
+-- Every layout leaves room for a full server of spawns.
+for _, layout in ipairs({ "Square", "Donut", "Cross", "Islands", "Pyramid" }) do
+	check("layout big enough: " .. layout, (layoutStats(layout)) >= 48)
+end
+
+-- scaleWave keeps smaller maps from emptying faster.
+check("scale full", Grid.scaleWave(5, 100, 100) == 5)
+check("scale islands", Grid.scaleWave(5, 64, 100) == 3 and Grid.scaleWave(3, 64, 100) == 2)
+check("scale minimum", Grid.scaleWave(1, 10, 100) == 1)
+
+-- pickDifferent never repeats when there's a choice.
+local repeats = 0
+for _ = 1, 200 do
+	if Grid.pickDifferent({ "A", "B", "C" }, "B", math.random) == "B" then
+		repeats += 1
+	end
+end
+check("pickDifferent avoids last", repeats == 0)
+check("pickDifferent single", Grid.pickDifferent({ "A" }, "A", math.random) == "A")
+
 if failures > 0 then
 	error(failures .. " grid test(s) failed")
 end

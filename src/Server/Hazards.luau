@@ -51,7 +51,7 @@ end
 
 local function meteorStrike(ctx: Context, target: BasePart)
 	local impact = target.Position
-	local surfaceY = World.getSurfaceY()
+	local surfaceY = World.getTileTop(target) -- raised tiles on the Pyramid map
 
 	local marker = effectPart({
 		Name = "MeteorMarker",
